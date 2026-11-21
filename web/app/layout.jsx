@@ -1,4 +1,7 @@
+import '@fontsource-variable/noto-sans-sc';
 import './styles.css';
+import './studio-effects.css';
+import './studio-typography.css';
 
 export const metadata = {
   title: '镜序 · 短剧工作台',

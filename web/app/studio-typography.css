@@ -1,0 +1,66 @@
+:root {
+  --font: 'Noto Sans SC Variable', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  --text-small: 12px;
+  --text-body: 14px;
+  --line-small: 18px;
+  --line-body: 22px;
+}
+
+body { font-size: var(--text-body); line-height: var(--line-body); }
+h1, h2, h3 { letter-spacing: normal; }
+h1, .overview-header h1 { font-size: clamp(24px, 3vw, 32px); line-height: 1.32; font-weight: 680; }
+h2 { font-size: 21px; line-height: 1.45; font-weight: 660; }
+h3 { font-size: 16px; line-height: 1.45; font-weight: 650; }
+.general-heading p, .section-heading p { font-size: var(--text-body); line-height: var(--line-body); }
+.overview-header p { margin-top: 8px; }
+.section-heading p, .shot-description, .dialogue p { text-autospace: ideograph-alpha ideograph-numeric; }
+.workspace b, .sidebar .nav-item { font-size: var(--text-body); line-height: var(--line-body); }
+.workspace small, .account small { font-size: var(--text-small); line-height: var(--line-small); }
+.workspace small { margin-top: 2px; }
+.sidebar .nav-item { gap: 10px; }
+.sidebar .nav-item.selected { font-weight: 650; }
+.sidebar .account > div:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.button, .field, .field input, .field select, .field textarea { font-size: var(--text-body); line-height: var(--line-body); }
+.button { font-weight: 600; }
+.button.small { font-size: 13px; }
+.field { gap: 6px; margin-bottom: 14px; }
+.form-note { color: var(--muted); }
+.form-error, .field-error { padding-block: 4px; }
+
+.workspace-picker { flex: none; min-width: 0; }
+.workspace-choices { margin-top: 6px; padding: 5px; background: var(--white); border: 1px solid var(--line); border-radius: 10px; max-height: 35vh; overflow: auto; }
+.workspace-option, .workspace-menu-actions button { display: flex; width: 100%; align-items: center; text-align: left; gap: 8px; border-radius: 6px; padding: 7px 8px; }
+.workspace-option { justify-content: space-between; }
+.workspace-option > span { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.workspace-option b { font-weight: 600; line-height: var(--line-body); }
+.workspace-option small { color: var(--muted); line-height: var(--line-small); }
+.workspace-option svg, .workspace-menu-actions svg { flex-shrink: 0; }
+.workspace-option[aria-current], .workspace-option:hover, .workspace-menu-actions button:hover { background: var(--surface-raised); color: var(--accent); }
+.workspace-option:focus-visible, .workspace-menu-actions button:focus-visible { outline-offset: -2px; }
+.workspace-menu-actions { display: grid; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+
+.workspace-usage-row { display: grid; grid-template-columns: minmax(9rem, 1fr) minmax(20rem, 1.9fr) auto; gap: 16px; padding: 16px 18px; }
+.workspace-usage-row dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.workspace-usage-row dl > div { text-align: right; }
+.workspace-usage-row dt { font-size: var(--text-small); line-height: var(--line-small); color: var(--muted); }
+.workspace-usage-row dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; font-weight: 650; }
+.workspace-usage-row dd, .usage-stats, .cost-summary { font-variant-numeric: tabular-nums; }
+.shot-description, .dialogue p { font-size: var(--text-body); line-height: 24px; overflow-wrap: anywhere; }
+.dialogue-header span, .dialogue-header .text-link { font-size: var(--text-small); line-height: var(--line-small); }
+.workflow-picker { display: none; }
+
+@media (max-width: 1050px) {
+  .workspace-usage-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .workspace-usage-row dl { grid-column: 1 / -1; grid-row: 2; }
+  .workspace-usage-row dl > div { text-align: left; }
+  .workspace-usage-row button { grid-column: 2; grid-row: 1; }
+}
+
+@media (max-width: 620px) {
+  .workflow { display: none; }
+  .workflow-picker { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .workflow-picker > span { color: var(--muted); }
+  .workflow-picker select { min-height: 40px; padding: 7px 10px; flex: 1; min-width: 0; color: var(--text); background: var(--white); border: 1px solid var(--line); border-radius: 8px; }
+  .workspace-usage-row dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace-usage-row { padding: 14px; }
+}

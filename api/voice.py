@@ -2,6 +2,7 @@
 import ctypes as C
 import io
 import os
+import subprocess
 import threading
 import wave
 from pathlib import Path
@@ -13,8 +14,49 @@ _lock = threading.Lock()
 _callback_type = C.CFUNCTYPE(C.c_int, C.POINTER(C.c_short), C.c_int, C.c_void_p)
 _MAX_AUDIO = 8 * 1024 * 1024
 
+_WINDOWS_VOICE = """
+$ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName System.Speech
+$voice = [System.Speech.Synthesis.SpeechSynthesizer]::new()
+$audio = [IO.MemoryStream]::new()
+try {
+    $mandarin = $voice.GetInstalledVoices([Globalization.CultureInfo]::GetCultureInfo('zh-CN')) |
+        Where-Object Enabled | Select-Object -First 1
+    if (!$mandarin) { exit 3 }
+    $voice.SelectVoice($mandarin.VoiceInfo.Name)
+    $voice.SetOutputToWaveStream($audio)
+    $voice.Speak([Console]::In.ReadToEnd())
+    $voice.SetOutputToNull()
+    $audio.Position = 0
+    $audio.CopyTo([Console]::OpenStandardOutput())
+} finally {
+    $voice.Dispose()
+    $audio.Dispose()
+}
+"""
+
+
+def windows_wav(dialogue):
+    env = {key: value for key, value in os.environ.items() if key.lower() != "psmodulepath"}
+    try:
+        output = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_VOICE],
+            input=dialogue.encode("utf-8"), capture_output=True, timeout=30, env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("Windows 普通话配音引擎未能启动") from error
+    if output.returncode == 3:
+        raise ValueError("Windows 尚未安装普通话配音音色")
+    if output.returncode or not output.stdout.startswith(b"RIFF") or len(output.stdout) > _MAX_AUDIO:
+        raise ValueError("Windows 普通话配音失败")
+    return output.stdout
+
 
 def local_wav(dialogue):
+    if os.name == "nt":
+        return windows_wav(dialogue)
     text = dialogue.encode("utf-8")
     fragments = []
     processing_failed = False

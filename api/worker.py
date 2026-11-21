@@ -5,9 +5,10 @@ from contextlib import contextmanager
 from threading import Event, Thread
 from datetime import date
 
+import httpx
 from sqlalchemy import select
 
-from . import assets, config, media, script
+from . import assets, cloud_image, config, media, script
 from .store import engine, init, jobs, lookup, now, project_row, save_project, trends, workspaces, write
 
 log = logging.getLogger("jingxu.worker")
@@ -21,7 +22,7 @@ def next_job():
             result = job["result"] or {}
             safe = not job["payload"]["live"] or result.get("order")
             connection.execute(jobs.update().where(jobs.c.id == job["id"]).values(
-                state="queued" if safe else "uncertain", updated=now(),
+                state="queued" if safe else ("failed" if job["kind"] == "script" else "uncertain"), updated=now(),
                 result={**result, "message": "工作进程中断，需核对供应商订单"}))
         query = select(jobs).where(jobs.c.state == "queued").order_by(jobs.c.created).limit(1).with_for_update(skip_locked=True)
         job = connection.execute(query).mappings().first()
@@ -34,8 +35,12 @@ def apply_result(connection, job, result):
     row = project_row(connection, job["workspace"], job["project"], True)
     data = row["data"]
     payload = job["payload"]
-    if job["kind"] == "script" and not payload.get("beat"):
-        data["script"] = result
+    if job["kind"] == "portrait":
+        asset = result["asset"]
+        if not any(item["id"] == asset["id"] for item in data["assets"]):
+            data["assets"].append(asset)
+    elif job["kind"] == "script" and not payload.get("beat"):
+        data["script"] = {key: value for key, value in result.items() if key != "provider"}
         data["version"] += 1
         data["export"] = None
     elif data["version"] != payload["version"]:
@@ -48,7 +53,8 @@ def apply_result(connection, job, result):
         data["script"]["beats"][index] = proposed
         data["export"] = None
     elif job["kind"] == "export":
-        if any(a.get("clip") != b.get("clip") for a, b in zip(data["script"]["beats"], payload["beats"])):
+        if (bool(data.get("render_settings", {}).get("full_dynamic")) != bool(payload.get("full_dynamic")) or
+                any(a.get("clip") != b.get("clip") for a, b in zip(data["script"]["beats"], payload["beats"]))):
             return
         data["export"] = result["file"]
     else:
@@ -58,16 +64,23 @@ def apply_result(connection, job, result):
             return
         if job["kind"] == "frame":
             beat.update(frame=result["file"], approved=False)
-            beat.pop("clip", None)
+            for field in ("clip", "caption", "clip_dynamic", "clip_reviewed", "frame_trusted_until"):
+                beat.pop(field, None)
+            if result.get("trusted_until"):
+                beat["frame_trusted_until"] = result["trusted_until"]
+            asset = result.get("asset")
+            if asset and not any(item["id"] == asset["id"] for item in data["assets"]):
+                data["assets"].append(asset)
         elif beat.get("frame") == original.get("frame") and beat["approved"]:
-            beat.update(clip=result["file"], caption=result["caption"])
+            beat.update(clip=result["file"], caption=result["caption"],
+                        clip_dynamic=bool(result.get("dynamic") and payload.get("full_dynamic")), clip_reviewed=False)
         else:
             return
         data["export"] = None
     save_project(connection, row, data)
 
 
-def complete(job, state, result):
+def complete(job, state, result, *, rejected=False):
     with write() as connection:
         row = project_row(connection, job["workspace"], job["project"], True)
         if not row:
@@ -81,7 +94,7 @@ def complete(job, state, result):
         live = job["payload"]["live"]
         connection.execute(jobs.update().where(jobs.c.id == job["id"]).values(
             state=state, result={**(current["result"] or {}), **result}, updated=now(),
-            reserved=current["reserved"] if live else 0,
+            reserved=current["reserved"] if live and not rejected else 0,
             spent=current["reserved"] if not live and state == "done" else 0))
 
 
@@ -107,14 +120,15 @@ def heartbeat(job_id):
 
 
 def process(job):
-    handlers = {"frame": media.frame, "clip": media.clip, "export": media.compose}
+    handlers = {"frame": media.frame, "clip": media.clip, "export": media.compose, "portrait": media.portrait}
     try:
         payload = job["payload"]
         if payload["live"] != config.live_enabled():
             raise ValueError("任务计费模式与 Worker 配置不一致，未调用供应商")
         with heartbeat(job["id"]):
             if job["kind"] == "script":
-                result = script.draft(payload["document"], payload["trends"], (payload.get("beat") or {}).get("id"), payload.get("notes", ""))
+                result = script.draft(payload["document"], payload["trends"], (payload.get("beat") or {}).get("id"),
+                                      payload.get("notes", ""), payload.get("narrative"))
             else:
                 result = handlers[job["kind"]](job)
         complete(job, "done", result)
@@ -122,8 +136,33 @@ def process(job):
         log.warning("%s %s failed (%s)", job["kind"], job["id"], type(error).__name__)
         live = job["payload"]["live"]
         known_error = isinstance(error, (ValueError, media.UnknownOrder))
-        message = str(error)[:250] if known_error else "生成失败，请检查供应商状态及 Worker 日志"
-        complete(job, "uncertain" if live else "failed", {"message": message})
+        rejected = (job["kind"] == "export" or isinstance(error, (config.ModelUnavailable, cloud_image.CloudImageRejected)) or
+                    bool(job["payload"].get("local_frame") or job["payload"].get("import_order")))
+        if isinstance(error, httpx.HTTPStatusError):
+            message = f"供应商接口返回 HTTP {error.response.status_code}"
+            if job["kind"] == "script" and error.response.status_code in {400, 401, 402, 403, 404, 422, 429}:
+                rejected = True
+            if job["kind"] in {"frame", "clip", "portrait"} and error.request.method == "POST" and error.response.status_code == 404:
+                try:
+                    code = error.response.json()["error"]["code"]
+                except (ValueError, KeyError, TypeError):
+                    code = None
+                model = job["payload"].get("model") if job["kind"] == "portrait" else config.job_model(job["kind"], job["payload"])
+                if code == "ModelNotOpen":
+                    rejected = True
+                    message = f"火山方舟尚未开通模型 {model}，请在开通管理里开启该模型后重试"
+                elif code in ("InvalidEndpointOrModel.NotFound", "InvalidEndpointOrModel.ModelIDAccessDisabled"):
+                    rejected = True
+                    message = f"火山方舟当前 Key 无权访问模型或接入点 {model}，请核对开通状态和推理接入点"
+        elif job["kind"] == "script" and isinstance(error, httpx.TimeoutException):
+            message = "DeepSeek 响应超时，原剧本仍可使用。可重新提交，原调用费用待对账"
+        else:
+            message = str(error)[:250] if known_error else "生成失败，请检查供应商状态及 Worker 日志"
+        details = {"message": message}
+        if isinstance(error, script.StoryboardError):
+            details["narrative"] = error.narrative
+        complete(job, "uncertain" if live and not rejected and job["kind"] != "script" else "failed",
+                 details, rejected=rejected)
 
 
 def refresh_trends():

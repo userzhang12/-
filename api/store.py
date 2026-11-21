@@ -7,7 +7,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, Column, Float, Integer, MetaData, String, Table, create_engine, select
+from sqlalchemy import JSON, Boolean, Column, Float, ForeignKey, Integer, MetaData, String, Table, case, create_engine, select
 
 ROOT = Path(os.getenv("JINGXU_DATA", str(Path(__file__).resolve().parents[1] / "data"))).resolve()
 ROOT.mkdir(parents=True, exist_ok=True)
@@ -18,6 +18,11 @@ workspaces = Table("workspaces", schema, Column("id", String, primary_key=True),
                    Column("name", String), Column("quota", Integer, nullable=False))
 users = Table("users", schema, Column("email", String, primary_key=True),
               Column("password", String), Column("workspace", String, nullable=False), Column("admin", Boolean))
+memberships = Table("workspace_memberships", schema,
+                    Column("workspace", String, ForeignKey("workspaces.id"), primary_key=True),
+                    Column("email", String, ForeignKey("users.email"), primary_key=True, index=True),
+                    Column("role", String, nullable=False))
+migrations = Table("schema_migrations", schema, Column("name", String, primary_key=True))
 operators = Table("operators", schema, Column("email", String, primary_key=True))
 sessions = Table("sessions", schema, Column("id", String, primary_key=True),
                  Column("email", String), Column("expires", Float))
@@ -34,7 +39,17 @@ trends = Table("trends", schema, Column("workspace", String, primary_key=True), 
 
 
 def init():
-    schema.create_all(engine)
+    with write() as connection:
+        if engine.dialect.name == "postgresql":
+            # API and Worker may both initialize the shared database during startup.
+            connection.exec_driver_sql("SELECT pg_advisory_xact_lock(76129015)")
+        schema.create_all(connection)
+        revision = "workspace_memberships_v1"
+        if not lookup(connection, migrations, migrations.c.name == revision):
+            legacy = select(users.c.workspace, users.c.email,
+                            case((users.c.admin.is_(True), "owner"), else_="member"))
+            connection.execute(memberships.insert().from_select(["workspace", "email", "role"], legacy))
+            connection.execute(migrations.insert().values(name=revision))
 
 
 @contextmanager

@@ -65,6 +65,11 @@ export default function Storyboard({ project, current, select, filter, setFilter
   }
 
   const stage = current.clip ? '片段预览' : isSample ? '示例首帧' : '首帧预览';
+  const plan = project.script.visual;
+  const scene = plan?.scenes.find(item => item.id === current.scene_id);
+  const cast = plan?.characters.filter(person => current.character_ids?.includes(person.id)) || [];
+  const previous = shots[index - 1];
+  const entry = !current.product && previous?.scene_id === current.scene_id ? previous?.exit : '';
   const storedAssets = project.assets.filter(asset => current.asset_ids?.includes(asset.id));
   const used = project.spent + project.committed;
   const ratio = project.budget ? Math.min(1, used / project.budget) : 0;
@@ -116,8 +121,14 @@ export default function Storyboard({ project, current, select, filter, setFilter
             <div className="dialogue"><div className="dialogue-header"><span><AudioLines size={14}/> 分镜台词</span>{current.dialogue && <button className="text-link" disabled={busy} onClick={onVoice}><Play size={12}/>试听普通话</button>}</div><p>{current.dialogue ? '「' + current.dialogue + '」' : '此镜无台词'}</p>{voicePreview && <audio className="voice-preview" aria-label="普通话配音试听" controls autoPlay src={voicePreview}/>}</div>
           </Tabs.Content>
           <Tabs.Content value="prompts" className="detail-content prompts-content">
+            {scene && <>
+              <h4>场景与光线</h4><p>{plan.setting}。{scene.name} · {scene.time} · {scene.light}。{scene.layout}</p>
+              {cast.length > 0 && <><h4>本镜人物</h4>{cast.map(person => <p key={person.id}>{person.name} · {person.appearance} · {person.wardrobe}</p>)}</>}
+              {entry && <><h4>承接上一镜</h4><p>{entry}</p></>}
+            </>}
             <h4>首帧提示词</h4><p>{current.prompt || '暂未填写'}</p>
             <h4>动态提示词</h4><p>{current.motion || '暂未填写'}</p>
+            {current.exit && <><h4>镜尾状态</h4><p>{current.exit}</p></>}
           </Tabs.Content>
           <Tabs.Content value="assets" className="detail-content">
             {storedAssets.length ? storedAssets.map(asset => <div className="inspector-asset" key={asset.id}><img src={file(asset.cutout)} alt=""/><span>{asset.view} · V{asset.version}</span></div>) : <p className="studio-muted">此镜头未绑定素材。可在「编辑分镜」中选择已有素材。</p>}

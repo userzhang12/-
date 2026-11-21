@@ -42,7 +42,7 @@ STORY_PROMPT = """
 
 先输出 visual，再输出 12 个各 10 秒的 beats，顺序必须与 shot_slots 完全一致。visual 的 setting 简述时代、地域和画风；style 为 realistic（真人质感）或 stylized（明显动画或插画）。characters 是虚构角色清单，设置可辨识的年龄、发型、面部细节、服装和自然声线。scenes 固定场景的时间、主光源和门窗桌几及人物左右关系。时间、空间或主光源确实变化时，分配新的 scene_id 并交代过渡；同一房间亮灯和停电后应该用两个场景编号。prompt 简写第一帧姿态、视线与道具状态，motion 写动作先后和机位。exit 用一句话交代镜尾可被下一镜接住的人物和道具状态；同场继续上一镜动作，保持门、桌、道具、光线、穿着和机位轴线一致。
 
-product 表示镜序要用真实商品素材出首帧。至少一个镜头为 product=true，画面只展示商品，character_ids 为空，可以有画外音。show_product 表示商品实际可见，和人物同框也为 true。shot_slots 中 product=true 时需输出两个 true；product=false 的镜头两个字段都是 false，画面包括首帧、镜中、结尾都只能表现商品在画外或完全遮挡的状态。product=null 的镜头按剧情安排。speaker_id 标识说话人，dialogue 只放说出口的内容，不在台词里再写名字、画外或表演说明。events 写可拍的镜内变化，开头首个变化必须在 0–2 秒，10 秒内一般有 2–3 个有意义的事件。热梗非必须，最多 2 个且来自输入。
+show_product 表示商品实际可见。人物取出、递交或使用商品时，人物与商品同框也应标 true。全片至少一镜实际可见，只提到商品或包装完全遮挡不算。product 仅用于用真实商品素材制作首帧的商品专镜，只有商品可见且无人物入画时才能为 true，可有画外音。软植入无需另加商品专镜；用户明确要求商品专镜时按要求安排。shot_slots 的 show_product=true 表示本镜必须露出商品，可由人物完成；false 表示整镜不可见，两个字段都为 false；null 由剧情安排。speaker_id 标识说话人，dialogue 只放说出口的内容，不在台词里再写名字、画外或表演说明。events 写可拍的镜内变化，开头首个变化必须在 0–2 秒，10 秒内一般有 2–3 个有意义的事件。热梗非必须，最多 2 个且来自输入。
 
 只输出 JSON。以下为键名与类型示例，示例内容不能套进故事；beats 应有 12 项。
 {"title":"片名","trope":"叙事方式","visual":{"setting":"时代和地域","style":"realistic","characters":[{"id":"c1","name":"角色名","appearance":"年龄、发型和面部特征","wardrobe":"固定服装","voice":"说话语速与气质"}],"scenes":[{"id":"s1","name":"地点","time":"时间","light":"主光源","layout":"空间和人物位置"}]},"beats":[{"title":"镜头标题","size":"中近景","scene_id":"s1","character_ids":["c1"],"speaker_id":"c1","description":"镜内发生的动作和变化","dialogue":"一句口语台词","prompt":"首帧姿态和道具状态","motion":"动作顺序与镜头走法","exit":"镜尾人物和道具状态","hook":"本镜留下的具体疑问或新事实","product":false,"show_product":false,"fact_ids":[],"trend":"","events":[{"offset":0,"detail":"可拍的变化"}]}]}
@@ -206,7 +206,7 @@ def draft_shots(document, pool, focus, notes, progress):
             request["narrative"] = progress
             system += "\n将输入 narrative 拆成制作分镜，保留原故事的人物、冲突、反转与结局。"
             request["shot_slots"] = [{"id": f"{index + 1:02}", "start": start, "end": start + 10,
-                                      "product": start == product_start if product_start is not None and start <= product_start else None}
+                                      "show_product": start == product_start if product_start is not None and start <= product_start else None}
                                      for index, start in enumerate(range(0, DURATION, 10))]
         response = request_json(system, request, 2200 if current else 7600)
         reply = response.json()
@@ -292,12 +292,11 @@ def draft_shots(document, pool, focus, notes, progress):
             normalize_dialogue(beat, visual_context(story, beat))
     validate_script(beats, sources, trends)
     if visual:
-        first_product = next((beat["start"] for beat in beats if beat["product"]), None)
-        if first_product is None:
-            raise ValueError("DeepSeek 没有安排真实商品镜头")
         first_visible = next((beat["start"] for beat in beats if beat["show_product"]), None)
-        if product_start is not None and (first_product != product_start or first_visible != product_start):
-            raise ValueError(f"DeepSeek 没有在 {product_start}–{product_start + 10} 秒安排首个商品专镜")
+        if first_visible is None:
+            raise ValueError("分镜没有安排商品入画，可在人物取出、递交或使用商品时自然露出")
+        if product_start is not None and first_visible != product_start:
+            raise ValueError(f"商品必须在 {product_start}–{product_start + 10} 秒首次入画，允许与人物同框")
         if not any(event["offset"] <= 2 for event in beats[0]["events"]):
             raise ValueError("首镜前三秒缺少可执行的开场动作")
     return {"title": str(generated.get("title", document["name"]))[:150], "trope": str(generated.get("trope", tropes[0][0]))[:60],

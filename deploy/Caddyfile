@@ -1,5 +1,11 @@
 {$JINGXU_PUBLIC_HOST} {
 	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=86400"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
 	request_body {
 		max_size 16MB
 	}
@@ -18,6 +24,7 @@
 	handle /api/* {
 		reverse_proxy api:8000 {
 			flush_interval -1
+			header_up X-Jingxu-Client-IP {remote_host}
 		}
 	}
 

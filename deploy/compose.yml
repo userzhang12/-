@@ -10,6 +10,8 @@ x-python: &python
     DATABASE_URL: postgresql+psycopg://jingxu:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/jingxu
     JINGXU_DEMO: "0"
     JINGXU_SECURE_COOKIE: "1"
+    JINGXU_PUBLIC_HOST: ${JINGXU_PUBLIC_HOST:?set JINGXU_PUBLIC_HOST}
+    JINGXU_TRUST_PROXY: "1"
     JINGXU_DOWNLOAD_KEY: ${JINGXU_DOWNLOAD_KEY:?set JINGXU_DOWNLOAD_KEY}
   volumes:
     - media:/data

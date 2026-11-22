@@ -36,6 +36,10 @@ jobs = Table("jobs", schema, Column("id", String, primary_key=True), Column("pro
              Column("reserved", Integer, nullable=False), Column("spent", Integer, nullable=False),
              Column("created", Float), Column("updated", Float), Column("payload", JSON), Column("result", JSON))
 trends = Table("trends", schema, Column("workspace", String, primary_key=True), Column("data", JSON))
+request_limits = Table("request_limits", schema,
+                       Column("scope", String, primary_key=True),
+                       Column("bucket", Integer, primary_key=True, index=True),
+                       Column("hits", Integer, nullable=False))
 
 
 def init():

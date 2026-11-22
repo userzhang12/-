@@ -11,10 +11,10 @@ from typing import Annotated, NamedTuple
 
 import httpx
 from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import select, text as sql_text
 
-from . import assets, config, script, voice
+from . import assets, config, script, security, voice
 from .store import (digest, engine, init, invites, jobs, lookup, memberships, now, operators, password_hash, project_row,
                     projects, save_project, sessions, trends, uid, users, verifies, workspaces, write)
 
@@ -39,9 +39,15 @@ async def lifespan(_):
 app = FastAPI(title="镜序", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def check_write_origin(request: Request, call_next):
+    if not security.allowed_write(request):
+        return JSONResponse(status_code=403, content={"detail": "请求来源不受信任"})
+    return await call_next(request)
+
+
 @app.exception_handler(ValueError)
 async def value_error(_, error):
-    from fastapi.responses import JSONResponse
     return JSONResponse(status_code=422, content={"detail": str(error)})
 
 
@@ -161,7 +167,8 @@ def create_workspace(body: dict, access: Access):
 
 
 @app.post("/api/workspaces/join")
-def join_workspace(body: dict, access: Access):
+def join_workspace(body: dict, access: Access, request: Request):
+    security.limit_request(request, "join", 15)
     need(access.email != "demo", "请登录后加入工作空间", 403)
     code = text(body.get("code", ""), 150, True)
     with write() as connection:
@@ -176,9 +183,10 @@ def join_workspace(body: dict, access: Access):
 
 
 @app.post("/api/login")
-def login(body: dict, response: Response):
+def login(body: dict, response: Response, request: Request):
     email = text(body.get("email", ""), 254, True).lower()
     password = text(body.get("password", ""), 128, True)
+    security.limit_request(request, "login", 30, account=email)
     with write() as connection:
         row = lookup(connection, users, users.c.email == email)
         need(row and verifies(password, row["password"]), "邮箱或密码错误", 401)
@@ -187,7 +195,8 @@ def login(body: dict, response: Response):
 
 
 @app.post("/api/register")
-def register(body: dict, response: Response):
+def register(body: dict, response: Response, request: Request):
+    security.limit_request(request, "register", 15)
     email = text(body.get("email", ""), 254, True).lower()
     password = text(body.get("password", ""), 128, True)
     code = text(body.get("code", ""), 150, True)
@@ -293,7 +302,8 @@ def project_summary(row):
 
 
 @app.post("/api/voice/preview")
-def preview_voice(body: dict, access: Access):
+def preview_voice(body: dict, access: Access, request: Request):
+    security.limit_request(request, "voice-preview", 30)
     dialogue = text(body.get("text", ""), 120, True)
     need(any(character.isalnum() for character in dialogue), "请输入可朗读的台词")
     audio = voice.local_wav(dialogue)

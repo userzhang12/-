@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import DesktopUpdate from './desktop-update';
 import Storyboard, { storyboardStill, timecode } from './storyboard';
-import StudioLighting, { SidebarMirror } from './studio-lighting';
+import ProjectOverview from './project-overview';
 import {
   ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Box, Check,
   CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clapperboard, Clock3, Coins,
@@ -65,7 +66,7 @@ function routeUrl(route) {
     if (route.shot !== '01') params.set('shot', route.shot);
     if (route.filter !== 'all') params.set('filter', route.filter);
   }
-  return params.size ? '/?' + params : '/';
+  return params.size ? '/workbench?' + params : '/workbench';
 }
 
 function scopedUrl(url, workspaceId) {
@@ -103,7 +104,6 @@ export default function Workbench() {
   const { page, projectId, workspaceId, shot: active, filter } = route;
   const currentRoute = useRef(route);
   const lastProjectId = useRef(null);
-  const workspaceSurface = useRef(null);
   const sidebarSurface = useRef(null);
   const mobileToggle = useRef(null);
   const workspaceToggle = useRef(null);
@@ -502,7 +502,6 @@ export default function Workbench() {
 
   return <div className="app-shell">
     <aside className={'sidebar' + (mobile ? ' mobile-open' : '')} id="workbench-sidebar" ref={sidebarSurface} aria-label="工作空间导航">
-      <SidebarMirror activePage={sidebarPage}/>
       <Logo onHome={() => go('projects')} workspaceId={workspaceId}/>
       <div className="workspace-picker" ref={workspacePicker} onKeyDown={event => {
         if (event.key === 'Escape' && workspaceMenu) { event.stopPropagation(); setWorkspaceMenu(false); workspaceToggle.current?.focus(); }
@@ -532,12 +531,11 @@ export default function Workbench() {
       </div>
     </aside>
     {mobile && <button className="sidebar-scrim" aria-label="关闭导航" tabIndex={-1} onClick={closeMobileMenu}/>}
-    <div className="main" ref={workspaceSurface} inert={mobile || undefined}>
-      <StudioLighting surface={workspaceSurface} overview={page === 'projects'}/>
+    <div className="main" inert={mobile || undefined}>
       <header className="topbar">
         <button className="icon-button mobile-menu" aria-label="菜单" aria-controls="workbench-sidebar" aria-expanded={mobile} ref={mobileToggle} onClick={() => setMobile(value => !value)}><Menu size={20}/></button>
         <div className="breadcrumbs"><button onClick={() => go('projects')}>创作空间</button><ChevronRight size={14}/><b>{pageTitle[page]}</b></div>
-        <div className="top-actions">{session && <span className="system-status"><i/>{session.live ? '供应商模式' : '演示模式'}</span>}{page !== 'projects' && session && <button className="button primary small" onClick={() => open('create')}><Plus size={16}/>新建项目</button>}</div>
+        <div className="top-actions"><DesktopUpdate busy={busy}/>{session && <span className="system-status"><i/>{session.live ? '供应商模式' : '演示模式'}</span>}{page !== 'projects' && session && <button className="button primary small" onClick={() => open('create')}><Plus size={16}/>新建项目</button>}</div>
       </header>
       <main className="main-content">
         {pageLoading && <div className="panel blank" role="status">{authLoading ? '正在连接工作空间…' : '正在打开项目…'}</div>}
@@ -569,19 +567,13 @@ export default function Workbench() {
             voicePreview={voicePreview?.key === project.id + current.id + current.dialogue ? voicePreview.url : null}/> : <div className="panel blank"><Clapperboard size={32}/><h3>开始制作你的第一条短剧</h3><p>确认商品资料后，即可生成镜头、台词与提示词。</p><button className="button" onClick={() => go('product')}>查看商品资料 <ArrowRight size={16}/></button></div>}
         </>}
 
-        {!projectPanel && <div className={'section-heading general-heading' + (page === 'projects' ? ' overview-header' : '')}>
-          {page === 'projects' && <><span className="overview-light" aria-hidden="true"/><span className="overview-edge" aria-hidden="true"/></>}
-          <div><h1>{pageTitle[page]}</h1><p>{({ projects: '打开已有短剧，或从一件商品开始创作。', trends: '管理适用于项目的热点与表达素材。', usage: '查看项目成本和工作空间额度。', operations: '监控工作空间的配额、用量和生成任务。', settings: '管理成员和工作空间访问权限。', help: '了解从商品录入到成片的制作流程。' })[page]}</p></div>{page === 'projects' && <button className="button primary" onClick={() => open('create')}><Plus size={16}/>新建项目</button>}</div>}
+        {!projectPanel && page !== 'projects' && <div className="section-heading general-heading">
+          <div><h1>{pageTitle[page]}</h1><p>{({ trends: '管理适用于项目的热点与表达素材。', usage: '查看项目成本和工作空间额度。', operations: '监控工作空间的配额、用量和生成任务。', settings: '管理成员和工作空间访问权限。', help: '了解从商品录入到成片的制作流程。' })[page]}</p></div>
+        </div>}
 
-        {page === 'projects' && <>
-          {projectsError ? <div className="panel blank"><h2>暂时无法加载项目</h2><p role="alert">{projectsError}</p><button className="button" onClick={() => window.location.reload()}>重试</button></div> :
-            projects === null ? <div className="panel blank" role="status">正在加载项目…</div> :
-              projects.length ? <div className="card-grid">{projects.map(item => <button key={item.id} className="panel project-card" data-spotlight onClick={() => load(item.id, item.has_script ? 'script' : 'product')}>
-                <div className="project-cover placeholder-cover"><Clapperboard size={30}/></div><div><h3>{item.name}</h3><p>{item.export ? '已导出' : item.has_script ? '制作中' : '待生成剧本'}<ChevronRight size={15}/></p></div>
-              </button>)}</div> : <div className="panel blank"><Clapperboard size={30}/><h2>还没有项目</h2><p>新建项目，从填写商品资料开始。</p></div>}
-          <div className="section-heading"><h2>示例项目</h2></div>
-          <div className="card-grid"><button className="panel project-card" data-spotlight onClick={() => load('sample')}><div className="project-cover" style={{backgroundImage:'url(/still.webp)'}}/><div><h3>{sample.name}</h3><p>查看示例分镜<ChevronRight size={15}/></p></div></button></div>
-        </>}
+        {page === 'projects' && <ProjectOverview projects={projects} error={projectsError}
+          workspaceName={session?.name} sampleName={sample.name} load={load} create={() => open('create')}
+          media={(id, name) => scopedUrl('/api/projects/' + id + '/media/' + name, workspaceId)}/>}
         {page === 'product' && <><div className="section-heading"><div><h2>商品资料</h2><p>核对规格、宣传信息与优惠条件，确认后生成剧本。</p></div><div className="button-group"><button className="button" onClick={() => open(isSample ? 'create' : 'source')}>导入链接</button><button className="button" onClick={() => open(isSample ? 'create' : 'fact')}><Plus size={16}/>添加资料</button><button className="button primary" disabled={busy} onClick={async () => { if (await action('script', {}, '剧本生成任务已提交')) go('script'); }}><Sparkles size={16}/>生成剧本</button></div></div>
           <div className="panel data-panel">{project.facts.map(fact => <div className="data-row" key={fact.id}><div><h3>{fact.label}</h3><p>{fact.value}</p><small>来源 · {fact.source}</small></div>{fact.confirmed ? <span className="badge product-badge"><Check size={14}/>已确认</span> : <button className="button small" disabled={busy} onClick={() => action('confirm', {id:fact.id}, '资料已确认')}>确认资料</button>}</div>)}</div></>}
 

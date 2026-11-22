@@ -1,7 +1,17 @@
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 .pytest_cache/
 data/
 web/node_modules/
 web/.next/
+
+# Desktop build outputs
+desktop/node_modules/
+desktop/distribution.json
+desktop/dist/
+deploy/production.env
+deploy/service.env
+deploy/published/

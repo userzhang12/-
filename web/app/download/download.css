@@ -1,0 +1,36 @@
+.download-site{min-height:100vh;background:#131417;color:#f8f3ee;--site-accent:#ffa271;--site-line:#383438}
+.site-header,.site-main{width:min(1160px,calc(100% - 70px));margin:auto}
+.site-header{height:78px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--site-line);gap:15px}
+.site-brand,.site-brand>span,.site-header nav,.site-header nav a{display:flex;align-items:center}
+.site-brand{gap:12px;font-size:22px;font-weight:750}
+.site-brand>span{width:39px;height:39px;justify-content:center;border-radius:10px;background:var(--site-accent);color:#28170f}
+.site-header nav{gap:24px;font-size:13px;color:#c9c0c0}
+.site-header nav a{gap:5px}
+.site-header nav a:hover,.site-text-link:hover{color:var(--site-accent)}
+.download-hero{min-height:550px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:62px;align-items:center;padding:55px 0 45px}
+.site-platform{display:flex;align-items:center;gap:9px;margin-bottom:16px;color:#efb79c;font-size:13px;letter-spacing:.08em}
+.site-platform span{width:6px;height:6px;background:var(--site-accent);border-radius:50%}
+.download-hero h1{font-size:clamp(40px,5.4vw,83px);line-height:1.11;letter-spacing:-.075em}
+.download-hero h1 em{font-style:normal;color:var(--site-accent)}
+.download-description{margin:24px 0;max-width:480px;color:#c9c2c4;font-size:16px;line-height:1.8}
+.download-actions,.download-button,.site-text-link{display:flex;align-items:center;gap:10px}
+.download-actions{flex-wrap:wrap;gap:19px}
+.download-button{min-height:48px;justify-content:center;padding:0 16px;border-radius:7px;background:var(--site-accent);color:#28170f;font-weight:750}
+.download-button:not(.unavailable):hover{background:#ffc19f}
+.download-button.unavailable{border:1px solid #5e4c43;background:#332921;color:#f2c2a6}
+.site-text-link{font-size:13px;color:#e1d5d2}
+.system-requirements{margin-top:10px;color:#a9a2a7;font-size:12px}
+.download-visual{margin:0;position:relative;min-height:416px;border:1px solid #493831;border-radius:15px;overflow:hidden;background:#211915;isolation:isolate;display:grid;justify-items:center}
+.download-visual::before{content:'';position:absolute;inset:0;z-index:-1;background:radial-gradient(ellipse at 60% 45%,#6e402e70,transparent 70%),linear-gradient(90deg,#ffffff09 1px,transparent 1px) 0 0/28px 28px,linear-gradient(#ffffff09 1px,transparent 1px) 0 0/28px 28px}
+.download-visual img{height:378px;width:213px;object-fit:cover;margin:18px;border:1px solid #d5a08265;border-radius:7px;box-shadow:0 20px 60px #080403d1}
+.download-visual figcaption{position:absolute;bottom:13px;left:12px;right:12px;display:flex;gap:8px;align-items:center;font-size:11px;padding:7px 9px;background:#0d0b0bdd;border-radius:5px}
+.download-visual figcaption span{margin-left:auto;font-family:monospace;color:#d7b4a5}
+.site-details{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.site-feature,.site-release{padding:19px;border:1px solid var(--site-line);border-radius:9px;background:#1d1c20}
+.site-feature svg{color:var(--site-accent);margin-bottom:10px}
+.site-feature h2,.site-release h2{font-size:16px;margin-bottom:4px}
+.site-feature p,.site-release p{font-size:13px;color:#c8c0c2}
+.site-release{margin:24px 0 38px}
+.release-notes{white-space:pre-wrap;color:#e0d8d6;font:inherit}
+.site-release code{display:block;overflow-wrap:anywhere;margin-top:6px;color:#ffbe9c}
+@media(max-width:760px){.site-header,.site-main{width:calc(100% - 32px)}.site-header{height:62px}.site-header nav{gap:12px}.site-header nav a:first-child{display:none}.download-hero{grid-template-columns:1fr;gap:25px;padding:30px 0}.site-details{grid-template-columns:1fr;gap:10px}}

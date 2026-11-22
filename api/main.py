@@ -12,7 +12,7 @@ from typing import Annotated, NamedTuple
 import httpx
 from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, text as sql_text
 
 from . import assets, config, script, voice
 from .store import (digest, engine, init, invites, jobs, lookup, memberships, now, operators, password_hash, project_row,
@@ -129,6 +129,13 @@ def is_operator(email):
         return False
     with engine.connect() as connection:
         return lookup(connection, operators, operators.c.email == email) is not None
+
+
+@app.get("/api/health")
+def health():
+    with engine.connect() as connection:
+        connection.execute(sql_text("SELECT 1"))
+    return {"status": "ok"}
 
 
 @app.get("/api/session")
@@ -279,8 +286,10 @@ def invite(access: Access):
 
 def project_summary(row):
     data = row["data"]
+    script_data = data.get("script") or {}
+    thumbnail = next((beat["frame"] for beat in script_data.get("beats", []) if beat.get("frame")), None)
     return {"id": row["id"], "name": data["name"], "updated": row["updated"], "export": data["export"],
-            "has_script": bool(data.get("script"))}
+            "has_script": bool(script_data), "thumbnail": thumbnail}
 
 
 @app.post("/api/voice/preview")

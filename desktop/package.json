@@ -1,0 +1,15 @@
+{
+  "name": "jingxu-desktop",
+  "version": "0.1.0",
+  "description": "镜序桌面客户端",
+  "author": "Jingxu Studio",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "test": "node --test",
+    "build:win": "node scripts/build-win.cjs"
+  },
+  "dependencies": { "electron-updater": "6.8.11" },
+  "devDependencies": { "electron": "45.4.1", "electron-builder": "26.18.0" }
+}

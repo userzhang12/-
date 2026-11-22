@@ -1,0 +1,56 @@
+name: Build signed Jingxu for Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options: [beta, stable]
+        default: beta
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ inputs.channel }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    environment: desktop-${{ inputs.channel }}
+    env:
+      JINGXU_RELEASE_CHANNEL: ${{ inputs.channel }}
+      JINGXU_APP_URL: ${{ vars.JINGXU_APP_URL }}
+      JINGXU_RELEASE_ROOT: ${{ vars.JINGXU_RELEASE_ROOT }}
+      JINGXU_SIGNER_NAME: ${{ vars.JINGXU_SIGNER_NAME }}
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm --prefix desktop ci
+      - run: npm --prefix desktop test
+      - run: node --test release/manifest.test.mjs
+      - run: npm --prefix desktop run build:win
+      - name: Verify signed installer and app
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/package.json | ConvertFrom-Json).version
+          $paths = @("desktop/dist/jingxu-setup-$version-x64.exe", "desktop/dist/win-unpacked/jingxu.exe")
+          foreach ($path in $paths) {
+            $signature = Get-AuthenticodeSignature $path
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.GetNameInfo('SimpleName', $false) -ne $env:JINGXU_SIGNER_NAME) {
+              throw "Unexpected Authenticode signer or invalid signature for $path"
+            }
+          }
+      - run: node release/prepare.mjs "${{ inputs.channel }}" release/notes.md publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jingxu-windows-${{ inputs.channel }}
+          path: publish/
+          if-no-files-found: error

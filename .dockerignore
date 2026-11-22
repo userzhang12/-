@@ -1,0 +1,13 @@
+.git
+.github
+.env
+**/.env
+**/.env.*
+**/node_modules
+**/.next
+**/__pycache__
+data
+desktop
+deploy/*.env
+release
+tests

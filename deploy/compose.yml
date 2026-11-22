@@ -1,0 +1,84 @@
+name: jingxu
+x-python: &python
+  image: jingxu-api:local
+  build:
+    context: ..
+    dockerfile: deploy/api.Dockerfile
+  restart: unless-stopped
+  env_file: service.env
+  environment:
+    DATABASE_URL: postgresql+psycopg://jingxu:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/jingxu
+    JINGXU_DEMO: "0"
+    JINGXU_SECURE_COOKIE: "1"
+    JINGXU_DOWNLOAD_KEY: ${JINGXU_DOWNLOAD_KEY:?set JINGXU_DOWNLOAD_KEY}
+  volumes:
+    - media:/data
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jingxu
+      POSTGRES_USER: jingxu
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jingxu -d jingxu"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    <<: *python
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+  worker:
+    <<: *python
+    command: ["python", "-m", "api.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+  web:
+    image: jingxu-web:local
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      JINGXU_RELEASE_DIR: /releases
+      JINGXU_DOWNLOAD_ROOT: https://${JINGXU_PUBLIC_HOST:?set JINGXU_PUBLIC_HOST}/desktop/
+    volumes:
+      - ${JINGXU_RELEASE_STORAGE:-./published}:/releases:ro
+    depends_on:
+      api:
+        condition: service_healthy
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      JINGXU_PUBLIC_HOST: ${JINGXU_PUBLIC_HOST}
+      NO_PROXY: api,web,localhost,127.0.0.1
+      no_proxy: api,web,localhost,127.0.0.1
+    ports:
+      - "${JINGXU_HTTP_BIND:-0.0.0.0:80}:80"
+      - "${JINGXU_HTTPS_BIND:-0.0.0.0:443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${JINGXU_RELEASE_STORAGE:-./published}:/releases:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  database:
+  media:
+  caddy_data:
+  caddy_config:

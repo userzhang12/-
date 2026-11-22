@@ -1,0 +1,14 @@
+services:
+  api:
+    build:
+      secrets: [build_ca]
+  worker:
+    build:
+      secrets: [build_ca]
+  web:
+    build:
+      secrets: [build_ca]
+
+secrets:
+  build_ca:
+    file: ${JINGXU_BUILD_CA_FILE:?provide the trusted CA bundle path}

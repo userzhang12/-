@@ -11,3 +11,5 @@ desktop
 deploy/*.env
 release
 tests
+
+deploy/.production-env.*

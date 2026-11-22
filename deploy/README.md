@@ -30,7 +30,7 @@ docker compose --env-file deploy/production.env -f deploy/compose.yml exec -T db
 sudo bash deploy/bootstrap-local.sh
 ```
 
-脚本只绑定服务器的 `127.0.0.1:80/443`，保持登录要求，并使用本机证书完成 HTTPS 健康检查。首次运行会在 `deploy/` 下生成权限受限的数据库密码、下载签名密钥和工作空间注册码文件。重复执行会保留已有配置。购买域名并完成 DNS 解析后，将 `production.env` 的 `JINGXU_PUBLIC_HOST` 改为该域名，删除两个本机端口绑定项，再执行正式的 Compose 启动命令。不要重新生成数据库密码，以保留已有数据。
+脚本只绑定服务器的 `127.0.0.1:80/443`，保持登录要求，并使用本机证书完成 HTTPS 健康检查。首次运行会在 `deploy/` 下生成权限受限的数据库密码、下载签名密钥和工作空间注册码文件。重复执行会保留已有配置。购买域名并完成 A 记录后，运行 `sudo bash deploy/enable-domain.sh 网站域名 服务器公网IPv4`。脚本会核对 DNS、保留数据库和账号配置，再开启公网 HTTPS。
 
 ## Windows 安装包
 

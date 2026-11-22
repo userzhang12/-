@@ -15,3 +15,5 @@ desktop/dist/
 deploy/production.env
 deploy/service.env
 deploy/published/
+
+deploy/.production-env.*

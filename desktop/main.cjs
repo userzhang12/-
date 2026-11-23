@@ -4,7 +4,7 @@ const { endpoint, allowsNavigation, downloadName } = require('./policy.cjs');
 
 const settings = app.isPackaged
   ? require('./distribution.json')
-  : { appUrl: process.env.JINGXU_APP_URL || 'http://127.0.0.1:3000', channel: 'dev' };
+  : { appUrl: process.env.JINGXU_APP_URL || 'http://127.0.0.1:3000/workbench', channel: 'dev' };
 const target = endpoint(settings.appUrl, !app.isPackaged);
 const origin = target.origin;
 let window;

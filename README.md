@@ -43,4 +43,4 @@ npm --prefix web run dev -- --hostname 0.0.0.0 --port 3000
 
 已安装依赖后，可用 `./scripts/start.sh` 统一加载环境配置并启动三个进程。在云环境重启后也可重新运行此命令。使用 `./scripts/start.sh --live` 会先检查付费模式所需的供应商配置和价格表格式，再启动服务。配置检查本身不发起付费调用。请通过环境设置或受控的本地配置文件提供密钥。
 
-云端部署、Windows 签名构建和更新操作见 [发布手册](deploy/README.md)。本地启动后访问 `/download` 可查看官网下载页。
+云端部署、Windows 签名构建和更新操作见 [发布手册](deploy/README.md)。本地启动后，访问 `/` 可查看官网及 Windows 下载，访问 `/workbench` 可打开工作台。

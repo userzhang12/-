@@ -29,7 +29,6 @@
 	}
 
 	handle {
-		rewrite / /download
 		reverse_proxy web:3000
 	}
 }

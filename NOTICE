@@ -7,3 +7,9 @@ License, Version 2.0. Third-party material remains subject to its own terms.
 Jingxu / 镜序 names and logos, desktop/icon.ico, api/sample.jpg, and the
 image files under web/public/ are outside the scope of this license.
 No additional permission for those assets is granted by this repository.
+
+The model web/public/great-white-shark.glb is adapted from Leon Brocard's
+Great White Shark, dedicated to the public domain under CC0 1.0.
+The mesh was simplified and vertex colors were added for the web version.
+Source: https://github.com/acme/great-white-shark/tree/b20169f639ae19668df7d9936f693f9dac542f1f
+License: https://creativecommons.org/publicdomain/zero/1.0/

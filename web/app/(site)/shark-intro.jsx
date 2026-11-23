@@ -3,101 +3,122 @@
 import { useEffect, useRef } from 'react';
 import { animate } from 'motion';
 
-function makeShark(three) {
-  const { Group, Mesh, BufferGeometry, Float32BufferAttribute, MeshStandardMaterial,
-    MeshBasicMaterial, SphereGeometry, Shape, ExtrudeGeometry, DoubleSide, Color } = three;
-  const shark = new Group();
-  const skin = new MeshStandardMaterial({ vertexColors: true, roughness: 0.44, metalness: 0.07, side: DoubleSide });
-  const finSkin = new MeshStandardMaterial({ color: '#476978', roughness: 0.49, side: DoubleSide });
-  const rings = [
-    [-2.25, .09, .12, .05], [-1.82, .17, .19, .06], [-1.27, .35, .3, .035],
-    [-.65, .53, .46, .015], [0, .64, .55, 0], [.62, .65, .52, .01],
-    [1.15, .58, .42, .04], [1.57, .45, .30, .08], [1.89, .29, .19, .12],
-    [2.09, .13, .10, .14], [2.15, .005, .005, .14],
-  ];
-  const positions = [], colors = [], indices = [];
-  const top = new Color('#436575'), underside = new Color('#ddded2');
-  const sides = 40;
-  rings.forEach(([z, width, height, offset], ring) => {
-    for (let point = 0; point < sides; point++) {
-      const angle = point / sides * Math.PI * 2;
-      const vertical = Math.sin(angle);
-      positions.push(Math.cos(angle) * width, vertical * height + offset, z);
-      const blend = three.MathUtils.smoothstep(vertical, -.65, .04);
-      colors.push(...underside.clone().lerp(top, blend).toArray());
-      if (ring) {
-        const a = ring * sides + point, b = ring * sides + (point + 1) % sides;
-        indices.push(a - sides, b, a, a - sides, b - sides, b);
-      }
-    }
+const swim = `
+vec3 swimmingPosition(vec3 point, float time) {
+  float tail = smoothstep(0.15, 2.65, -point.z);
+  point.x += tail * tail * sin(time * 12.0 + point.z * 1.75) * 0.31;
+  return point;
+}
+`;
+
+function applySharkSkin(three, shark, swimTime, assembly, waterline) {
+  const skin = new three.MeshPhysicalMaterial({
+    vertexColors: true,
+    roughness: .35,
+    clearcoat: .58,
+    clearcoatRoughness: .29,
+    clippingPlanes: [waterline],
   });
-  const body = new BufferGeometry();
-  body.setAttribute('position', new Float32BufferAttribute(positions, 3));
-  body.setAttribute('color', new Float32BufferAttribute(colors, 3));
-  body.setIndex(indices);
-  body.computeVertexNormals();
-  shark.add(new Mesh(body, skin));
+  skin.onBeforeCompile = shader => {
+    shader.uniforms.swimTime = swimTime;
+    shader.uniforms.assembly = assembly;
+    shader.vertexShader = 'uniform float swimTime; varying float scanPosition;\n' + swim
+      + shader.vertexShader.replace('#include <begin_vertex>', `
+        #include <begin_vertex>
+        transformed = swimmingPosition(transformed, swimTime);
+        scanPosition = clamp((2.7 - position.z) / 5.4, 0.0, 1.0);
+      `);
+    shader.fragmentShader = 'uniform float assembly; varying float scanPosition;\n'
+      + shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
+        #include <clipping_planes_fragment>
+        if (assembly < 1.0) {
+          float coverage = smoothstep(-0.055, 0.10, assembly * 1.17 - scanPosition);
+          float grain = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+          if (grain >= coverage) discard;
+        }
+      `);
+  };
+  shark.traverse(object => {
+    if (!object.isMesh) return;
+    object.material.dispose();
+    object.material = skin;
+  });
+}
 
-  function fin(parent, outline, side = 1) {
-    const shape = new Shape();
-    shape.moveTo(...outline[0]);
-    for (const point of outline.slice(1)) shape.lineTo(...point);
-    shape.closePath();
-    const geometry = new ExtrudeGeometry(shape, { depth: 0.025, bevelEnabled: true, bevelSize: 0.024, bevelThickness: 0.024, bevelSegments: 2 });
-    const mesh = new Mesh(geometry, finSkin);
-    if (side === 0) mesh.rotation.y = -Math.PI / 2;
-    else {
-      mesh.rotation.x = Math.PI / 2;
-      mesh.scale.x = side;
-      mesh.position.y = -.21;
-    }
-    parent.add(mesh);
-  }
-  fin(shark, [[-.64,.42],[-.49,.82],[-.43,1.32],[-.01,.97],[.31,.51]], 0);
-  for (const side of [-1, 1]) {
-    fin(shark, [[.4,.55],[.86,.03],[1.54,-.78],[1.14,-.62],[.48,-.36]], side);
-  }
-  const tail = new Group();
-  tail.position.z = -2.18;
-  fin(tail, [[.16,.0],[-.46,.84],[-.89,1.10],[-.62,.36],[-.35,-.04],[-.75,-.65],[-.79,-.85],[-.40,-.64],[.16,-.09]], 0);
-  shark.add(tail);
+function makeSurfaceLight(three, shark, MeshSurfaceSampler, swimTime, assembly) {
+  let mesh;
+  shark.traverse(object => {
+    if (object.isMesh && !mesh) mesh = object;
+  });
+  if (!mesh) return null;
 
-  const eye = new MeshBasicMaterial({ color: '#07151c' });
-  const shine = new MeshBasicMaterial({ color: '#d3e2dd' });
-  const gillSkin = new MeshStandardMaterial({ color: '#263f4b', roughness: 0.68 });
-  const eyeGeometry = new SphereGeometry(.058, 12, 8);
-  const shineGeometry = new SphereGeometry(.014, 8, 6);
-  for (const side of [-1, 1]) {
-    const pupil = new Mesh(eyeGeometry, eye);
-    pupil.position.set(.482 * side, .132, 1.37);
-    shark.add(pupil);
-    const glint = new Mesh(shineGeometry, shine);
-    glint.position.set(.528 * side, .156, 1.387);
-    shark.add(glint);
-    for (let slit = 0; slit < 4; slit++) {
-      const z = .94 - slit * .13;
-      const curve = new three.CatmullRomCurve3([
-        new three.Vector3(.565 * side, .185, z - .025),
-        new three.Vector3(.625 * side, .067, z),
-        new three.Vector3(.624 * side, -.064, z + .006),
-        new three.Vector3(.577 * side, -.173, z + .045),
-      ]);
-      shark.add(new Mesh(new three.TubeGeometry(curve, 10, .01, 5, false), gillSkin));
-    }
+  const count = matchMedia('(max-width: 600px)').matches ? 800 : 1450;
+  const vertices = new Float32Array(count * 3);
+  const normals = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+  const position = new three.Vector3();
+  const normal = new three.Vector3();
+  shark.updateMatrixWorld(true);
+  const normalMatrix = new three.Matrix3().getNormalMatrix(mesh.matrixWorld);
+  const sampler = new MeshSurfaceSampler(mesh).build();
+
+  for (let index = 0; index < count; index++) {
+    sampler.sample(position, normal);
+    position.applyMatrix4(mesh.matrixWorld).toArray(vertices, index * 3);
+    normal.applyNormalMatrix(normalMatrix).toArray(normals, index * 3);
+    seeds[index] = Math.random();
   }
 
-  const mouth = new three.CatmullRomCurve3([
-    [-.48,-.15,1.38],[-.40,-.185,1.57],[-.22,-.118,1.84],
-    [0,-.07,1.94],[.22,-.118,1.84],[.40,-.185,1.57],[.48,-.15,1.38],
-  ].map(point => new three.Vector3(...point)));
-  shark.add(new Mesh(new three.TubeGeometry(mouth, 32, .016, 6, false), eye));
-  return { shark, tail };
+  const geometry = new three.BufferGeometry();
+  geometry.setAttribute('position', new three.BufferAttribute(vertices, 3));
+  geometry.setAttribute('normal', new three.BufferAttribute(normals, 3));
+  geometry.setAttribute('seed', new three.BufferAttribute(seeds, 1));
+  const material = new three.ShaderMaterial({
+    transparent: true,
+    blending: three.AdditiveBlending,
+    depthWrite: false,
+    uniforms: { swimTime, assembly },
+    vertexShader: swim + `
+      uniform float swimTime;
+      uniform float assembly;
+      attribute float seed;
+      varying float opacity;
+      varying vec3 tint;
+      void main() {
+        float scan = clamp((2.7 - position.z) / 5.4, 0.0, 1.0);
+        float arrival = 0.14 + scan * 0.66 + seed * 0.10;
+        float gathered = smoothstep(arrival - 0.32, arrival + 0.07, assembly);
+        float orbit = seed * 6.283 + swimTime * (1.8 + seed);
+        vec3 drift = normal * (0.28 + seed * 0.8) + vec3(cos(orbit), sin(orbit), cos(orbit * 0.71)) * 0.36;
+        vec3 point = swimmingPosition(position, swimTime) + drift * (1.0 - gathered);
+        vec4 world = modelMatrix * vec4(point, 1.0);
+        vec4 eye = viewMatrix * world;
+        gl_Position = projectionMatrix * eye;
+        gl_PointSize = clamp((30.0 + seed * 39.0) / max(-eye.z, 0.1), 1.25, 7.0);
+        float flicker = 0.76 + sin(orbit * 3.7) * 0.24;
+        float pulse = smoothstep(0.04, 0.20, assembly) * (1.0 - smoothstep(0.63, 1.12, assembly));
+        opacity = pulse * flicker * (0.21 + 0.79 * gathered) * smoothstep(-0.72, 0.12, world.y);
+        tint = mix(vec3(0.18, 0.64, 1.0), vec3(1.0, 0.76, 0.42), step(0.78, seed));
+      }`,
+    fragmentShader: `
+      varying float opacity;
+      varying vec3 tint;
+      void main() {
+        float distance = length(gl_PointCoord - 0.5);
+        float glow = (1.0 - smoothstep(0.03, 0.50, distance)) * opacity;
+        gl_FragColor = vec4(tint, glow);
+      }`,
+  });
+  const light = new three.Points(geometry, material);
+  light.frustumCulled = false;
+  shark.add(light);
+  return light;
 }
 
 function rebound(hero) {
   const strength = hero.clientWidth < 600 ? .62 : 1;
   const targets = [
-    ['.site-hero-preview', 13, 7, -.85, -.015, 0],
+    ['.site-hero-preview', 19, 9, -1.2, -.018, 0],
     ['.site-hero-copy', -6, 3, .24, 0, .055],
     ['.site-hero-actions', -3, 3, 0, 0, .105],
   ];
@@ -139,7 +160,7 @@ function rebound(hero) {
   return () => cancel.forEach(stop => stop());
 }
 
-function playIntro(three, canvas, onPass) {
+function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const hero = canvas.parentElement;
   if (motion.matches || hero.getBoundingClientRect().bottom < innerHeight * .65) return;
@@ -149,23 +170,31 @@ function playIntro(three, canvas, onPass) {
   } catch {
     return;
   }
+  renderer.localClippingEnabled = true;
+  renderer.toneMapping = three.ACESFilmicToneMapping;
   const scene = new three.Scene();
   const camera = new three.PerspectiveCamera(42, 1, 0.15, 60);
   camera.position.set(0, 0.75, 8);
   camera.lookAt(0, 0.5, 0);
-  scene.add(new three.HemisphereLight(0xd6f5ff, 0x536c91, 2.1));
-  const key = new three.DirectionalLight(0xffdfba, 3.0);
+  scene.add(new three.HemisphereLight(0xc8e8f3, 0x52657b, 1.55));
+  const key = new three.DirectionalLight(0xffe7cc, 2.65);
   key.position.set(4, 5, 3);
-  scene.add(key);
-  const { shark, tail } = makeShark(three);
+  const rim = new three.DirectionalLight(0x8acdea, 2.8);
+  rim.position.set(-3, 2, -4);
+  scene.add(key, rim);
+  const swimTime = { value: 0 };
+  const assembly = { value: 0 };
+  const waterline = new three.Plane(new three.Vector3(0, 1, 0), .12);
+  applySharkSkin(three, shark, swimTime, assembly, waterline);
+  const surfaceLight = makeSurfaceLight(three, shark, MeshSurfaceSampler, swimTime, assembly);
   scene.add(shark);
 
-  const count = 58;
+  const count = 144;
   const droplets = new Float32Array(count * 3);
   const velocities = Array.from({ length: count }, (_, index) => {
     const angle = index * 2.39996;
-    const spread = 0.52 + (index % 11) * 0.26;
-    return [Math.cos(angle) * spread, 1.7 + (index % 9) * .29, Math.sin(angle) * spread];
+    const spread = 0.45 + (index % 17) * 0.24;
+    return [Math.cos(angle) * spread, 1.6 + (index % 13) * .33, Math.sin(angle) * spread];
   });
   const splashGeometry = new three.BufferGeometry();
   const positions = new three.BufferAttribute(droplets, 3);
@@ -174,19 +203,23 @@ function playIntro(three, canvas, onPass) {
     transparent: true,
     depthWrite: false,
     uniforms: { opacity: { value: 0 } },
-    vertexShader: 'void main(){vec4 p=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*p;gl_PointSize=clamp(75./-p.z,1.5,8.);}',
+    vertexShader: 'void main(){vec4 p=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*p;gl_PointSize=clamp(96./-p.z,1.5,9.);}',
     fragmentShader: 'uniform float opacity;void main(){float d=length(gl_PointCoord-0.5);gl_FragColor=vec4(0.73,0.92,1.,opacity*(1.-smoothstep(0.13,0.5,d)));}',
   });
   const splash = new three.Points(splashGeometry, splashMaterial);
   splash.frustumCulled = false;
   scene.add(splash);
-  const points = [[3.1,-2.7,-14],[2.7,-.72,-8],[2.05,1.30,-1.8],[1.3,1.84,3.6],[.25,2.9,8.0]];
+  const points = [[3.1,-1.25,-15],[2.65,-.91,-10],[1.8,1.08,-3.6],[.75,1.44,3.1],[-.48,1.48,6.55],[-2.4,1.63,10.2]];
   const path = new three.CatmullRomCurve3(points.map(point => new three.Vector3(...point)));
   const direction = new three.Vector3(0, 0, 1);
   const start = performance.now();
+  const duration = 3.7;
+  const wake = new three.Vector3();
+  const wakeStart = new three.Vector3();
   let frame = 0;
   let stopped = false;
   let passed = false;
+  let impact = 0;
 
   function stop() {
     if (stopped) return;
@@ -217,31 +250,49 @@ function playIntro(three, canvas, onPass) {
 
   function animate(now) {
     const time = Math.max(0, now - start) / 1000;
-    if (time >= 3.25 || document.hidden || hero.getBoundingClientRect().bottom < innerHeight * 0.4) {
+    if (time >= duration || document.hidden || hero.getBoundingClientRect().bottom < innerHeight * 0.4) {
       stop();
       return;
     }
-    const progress = Math.pow(time / 3.25, 1.52);
-    if (!passed && progress >= .66) {
+    const progress = Math.pow(Math.min(time / 3.3, 1), 1.52);
+    if (!passed && progress >= .73) {
       passed = true;
+      impact = time;
+      wakeStart.copy(path.getPoint(.67));
       onPass();
     }
     shark.position.copy(path.getPoint(progress));
     const tangent = path.getTangent(progress);
-    tangent.y *= .64;
+    tangent.y *= .69;
     shark.quaternion.setFromUnitVectors(direction, tangent.normalize());
-    shark.rotateY(-.78 + progress * .53);
-    shark.rotateZ(Math.sin(time * 2.1) * .19 - .17);
-    tail.rotation.y = Math.sin(time * 12) * .34;
-    shark.visible = progress > .22;
-    const sprayTime = Math.max(0, time - 1.10);
-    splash.visible = sprayTime > 0 && sprayTime < 1.35;
+    shark.rotateY(-.66 + progress * .65);
+    shark.rotateZ(-.29 + progress * .46 + Math.sin(time * 2.8) * .12);
+    swimTime.value = time;
+    assembly.value = Math.min(1.2, Math.max(0, (time - .17) / 1.52));
+    if (surfaceLight) surfaceLight.visible = assembly.value < 1.12;
+    if (passed) {
+      const after = time - impact;
+      const recoil = Math.exp(-after * 11) * Math.sin(after * 34);
+      camera.position.x = .11 * recoil;
+      camera.position.y = .75 - .07 * recoil;
+    }
+    const sprayTime = time - 1.23;
+    const wakeTime = passed ? time - impact : -1;
+    const inWake = wakeTime >= 0 && wakeTime < .9;
+    splash.visible = (sprayTime > 0 && sprayTime < 1.35) || inWake;
     if (splash.visible) {
+      if (inWake) wake.copy(wakeStart).lerp(shark.position, .26);
       velocities.forEach(([x, y, z], index) => {
-        positions.setXYZ(index, 2.75 + x * sprayTime, -.45 + y * sprayTime - 2.6 * sprayTime ** 2, -7.6 + z * sprayTime);
+        if (inWake) {
+          const offset = (index % 23) / 22;
+          positions.setXYZ(index, wake.x + x * wakeTime * .44 + offset * .52,
+            wake.y + y * wakeTime * .21 - 2.2 * wakeTime ** 2, wake.z - offset * 4.7 + z * wakeTime);
+        } else {
+          positions.setXYZ(index, 2.30 + x * sprayTime, -.10 + y * sprayTime - 3.4 * sprayTime ** 2, -7.0 + z * sprayTime);
+        }
       });
       positions.needsUpdate = true;
-      splashMaterial.uniforms.opacity.value = (1 - sprayTime / 1.35) * .82;
+      splashMaterial.uniforms.opacity.value = inWake ? .59 * (1 - wakeTime / .9) ** 2 : (1 - sprayTime / 1.35) * .82;
     }
     canvas.dataset.playing = 'true';
     renderer.render(scene, camera);
@@ -268,13 +319,27 @@ export default function SharkIntro() {
     let stopRebound;
     const onMotion = event => { if (event.matches) stopRebound?.(); };
     motion.addEventListener('change', onMotion);
-    import('three').then(three => {
+    async function load() {
+      const [three, { GLTFLoader }, { MeshSurfaceSampler }] = await Promise.all([
+        import('three'),
+        import('three/addons/loaders/GLTFLoader.js'),
+        import('three/addons/math/MeshSurfaceSampler.js'),
+      ]);
+      if (cancelled) return;
+      const { scene } = await new GLTFLoader().loadAsync('/great-white-shark.glb');
       if (!cancelled) {
-        stop = playIntro(three, canvas.current, () => {
+        stop = playIntro(three, scene, MeshSurfaceSampler, canvas.current, () => {
           if (!motion.matches) stopRebound = rebound(canvas.current.parentElement);
         });
       }
-    }).catch(() => {});
+      if (!stop) {
+        scene.traverse(object => {
+          object.geometry?.dispose();
+          object.material?.dispose();
+        });
+      }
+    }
+    load().catch(() => {});
     return () => {
       cancelled = true;
       motion.removeEventListener('change', onMotion);

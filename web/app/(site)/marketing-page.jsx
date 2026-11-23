@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, FileText, Monitor, ScanLine } from 'lucide-react';
+import HeroOcean from './hero-ocean';
 import ProductPreview from './product-preview';
 import { releaseManifest } from './manifest.mjs';
 
@@ -56,6 +57,7 @@ export default async function Download() {
 
     <main id="top">
       <section className="site-hero" aria-labelledby="site-title">
+        <HeroOcean/>
         <div className="site-container site-hero-inner">
           <div className="site-hero-copy">
             <p className="site-kicker">镜序 · AI 商品短剧制作软件</p>

@@ -1,13 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ArrowDownToLine, ArrowUpRight, AudioLines, Box, ChevronDown, Clapperboard, Laptop, ScanLine, Video } from 'lucide-react';
-import SceneStory from './scene-story';
+import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, FileText, Monitor, ScanLine } from 'lucide-react';
 import { releaseManifest } from './manifest.mjs';
 import './download.css';
-import './scene-story.css';
 
 export const metadata = {
-  title: '镜序 · 商品短剧制作工作台',
+  title: '镜序 · AI 商品短剧制作软件',
   description: '镜序面向商家与内容团队，帮助你从商品资料、剧本和分镜制作带配音的竖屏短剧。',
 };
 export const dynamic = 'force-dynamic';
@@ -38,66 +36,71 @@ async function currentRelease(root) {
   }
 }
 
-const workflow = [
-  { icon: Box, title: '录入并确认商品', body: '添加商品资料、卖点和实拍图。先核对要展示的规格和优惠，再开始做剧本。' },
-  { icon: Clapperboard, title: '编辑剧本和分镜', body: '在时间轴上逐镜调整台词、画面和提示词。商品什么时候出现，由你决定。' },
-  { icon: AudioLines, title: '试听、审核与渲染', body: '先听台词、确认首帧，再生成动态片段。某一镜需要返工，可以单独重做。' },
-  { icon: Video, title: '导出竖屏成片', body: '检查配音、字幕与镜头衔接，再将成片导出为 1080 × 1920 MP4。' },
-];
-
 const questions = [
-  ['现在怎样开始使用？', '镜序目前采用邀请制。拿到邀请码后，打开工作台即可用邮箱注册并加入工作空间。已有账号可以直接登录。'],
-  ['一定要安装 Windows 客户端吗？', '可以先用网页版。正式安装包发布后，Windows 客户端和网页版可以登录同一个工作空间。'],
-  ['关闭网页后，生成任务会停止吗？', '已提交的云端任务会继续运行。重新打开工作台后，可以查看进度和已生成的结果。'],
-  ['镜头不满意，需要整条重做吗？', '可以调整并重算单个镜头。其他已审核的镜头可继续保留。重算涉及模型调用时，请先查看项目预算。'],
+  ['镜序支持哪些系统？', '首发客户端面向 Windows 10 和 Windows 11 的 x64 电脑。'],
+  ['安装后需要注册账号吗？', '需要。镜序目前采用邀请制，用邮箱和邀请码注册后可以加入工作空间。'],
+  ['成片可以导出成什么格式？', '可以导出适合短视频平台的 9:16 竖屏 MP4，包含配音和字幕。'],
 ];
 
 export default async function Download() {
   const root = downloadRoot();
   const release = root ? await currentRelease(root) : null;
   const installer = release && new URL('stable/' + release.file, root).href;
-  const workbench = '/workbench';
+  const system = 'Windows 10 / 11 · x64' + (release ? ' · v' + release.version : '');
 
   return <div className="download-site">
-    <header className="site-header">
-      <div className="site-container site-nav">
-        <a href="/download" className="site-brand"><span><ScanLine size={21}/></span>镜序</a>
-        <nav aria-label="官网导航">
-          <a href="#product">产品</a><a href="#workflow">制作流程</a><a href="#windows">客户端下载</a><a href="#questions">常见问题</a>
-        </nav>
-        <a className="site-action nav-action" href={workbench}>打开工作台 <ArrowUpRight size={15}/></a>
-      </div>
-    </header>
+    <header className="site-header"><div className="site-container site-nav">
+      <a href="#top" className="site-brand"><span><ScanLine size={22}/></span>镜序</a>
+      <nav aria-label="官网导航"><a href="#product">产品介绍</a><a href="#questions">常见问题</a></nav>
+      <a className="site-action nav-action" href="#windows"><ArrowDownToLine size={16}/> 客户端下载</a>
+    </div></header>
 
-    <main>
-      <SceneStory workbench={workbench}/>
-
-      <section className="site-preview-band" id="preview">
-        <div className="site-container">
-          <div className="site-section-heading workbench-preview-heading"><div><h2>进入真实的制作工作台</h2><p>查看完整分镜、竖屏预览和可编辑的台词与提示词。</p></div><a className="site-action secondary-action" href={workbench + '?page=script&project=sample'}>打开示例项目 <ArrowUpRight size={16}/></a></div>
-          <figure className="site-workbench-figure"><img src="/official-workbench.webp" alt="镜序实际分镜工作台，包含镜头列表、竖屏预览、台词试听和时间轴" loading="lazy"/><figcaption>镜序分镜工作台 · 示例项目</figcaption></figure>
+    <main id="top">
+      <section className="site-hero" aria-labelledby="site-title">
+        <figure className="site-hero-image">
+          <img src="/workspace-hero.webp" alt="" fetchPriority="high"/>
+          <figcaption><Clapperboard size={15}/> 镜序短剧示例 · 反转厨房</figcaption>
+        </figure>
+        <div className="site-container site-hero-inner">
+          <div className="site-hero-copy">
+            <p className="site-kicker">AI 商品短剧制作软件</p>
+            <h1 id="site-title">把商品拍成<br/><em>值得看完的故事。</em></h1>
+            <p className="site-summary">为商家与内容团队打造。从商品资料出发，制作有剧情、带配音的竖屏短剧。</p>
+            <div className="site-hero-actions">
+              {installer ? <a className="site-action primary-action" href={installer}><ArrowDownToLine size={18}/> 下载 Windows 版</a> :
+                <a className="site-action primary-action" href="#windows"><ArrowDown size={17}/> 查看下载</a>}
+            </div>
+            <p className="site-system">{system}{!release && ' · 安装包待发布'}</p>
+          </div>
         </div>
       </section>
 
-      <section id="workflow" className="site-container site-section">
-        <div className="site-section-heading"><h2>从一件商品到一条成片</h2></div>
-        <ol className="site-steps">{workflow.map(({ icon: Icon, title, body }) =>
-          <li key={title}><span className="site-step-icon"><Icon size={21}/></span><h3>{title}</h3><p>{body}</p></li>)}</ol>
-      </section>
-
-      <section id="windows" className="site-container site-section site-download">
-        <div><span className="site-step-icon"><Laptop size={22}/></span><h2>下载镜序客户端</h2><p>Windows 10 / 11 · x64{release ? ' · v' + release.version : ''}</p></div>
-        <div className="site-download-info">
-          {installer ? <a className="site-action primary-action" href={installer}><ArrowDownToLine size={17}/> 下载 Windows 版</a> : <p className="download-status">Windows 安装包待发布。现在可以使用网页版。</p>}
-          {release ? <>
-            <p>发布于 {release.published} · {(release.bytes / 1024 / 1024).toFixed(1)} MB</p>
-            <details><summary>查看版本说明和安装包校验值</summary><p className="release-notes">{release.notes}</p><code>SHA-256 {release.sha256}</code></details>
-          </> : <a className="download-text-link" href={workbench}>打开网页版 <ArrowUpRight size={15}/></a>}
+      <section className="site-container site-product" id="product" aria-labelledby="product-title">
+        <figure className="site-product-image"><img src="/story-product.webp" alt="示例短剧画面，暖光下的琥珀色玻璃瓶" loading="lazy"/><figcaption>短剧示例 · 商品特写</figcaption></figure>
+        <div className="site-product-copy">
+          <h2 id="product-title">让商品自然进入剧情。</h2>
+          <ul>
+            <li><FileText size={19}/><div><h3>从商品资料生成剧本</h3><p>把卖点写进人物的行动和对话，让观众跟着故事认识商品。</p></div></li>
+            <li><Clapperboard size={19}/><div><h3>按镜头调整故事</h3><p>台词、镜头和商品出场都可以逐镜修改。</p></div></li>
+            <li><Monitor size={19}/><div><h3>导出竖屏成片</h3><p>将画面、配音和字幕合成 9:16 MP4，方便发布到短视频平台。</p></div></li>
+          </ul>
         </div>
       </section>
 
-      <section id="questions" className="site-container site-section site-faq">
-        <div className="site-section-heading"><h2>常见问题</h2></div>
+      <section className="site-container" id="windows" aria-labelledby="download-title">
+        <div className="site-download">
+          <div><h2 id="download-title">下载镜序</h2><p>{system}</p></div>
+          <div className="site-download-info">
+            {installer ? <><a className="site-action primary-action" href={installer}><ArrowDownToLine size={17}/> 下载 .exe 安装包</a>
+              <p>发布于 {release.published} · {(release.bytes / 1024 / 1024).toFixed(1)} MB</p>
+              <details id="release"><summary>版本说明和安装包校验值</summary><p className="release-notes">{release.notes}</p><code>SHA-256 {release.sha256}</code></details>
+            </> : <p className="download-status" id="release">正式 Windows 安装包待发布。</p>}
+          </div>
+        </div>
+      </section>
+
+      <section className="site-container site-faq" id="questions" aria-labelledby="questions-title">
+        <h2 id="questions-title">常见问题</h2>
         <div>{questions.map(([question, answer]) => <details key={question}>
           <summary>{question}<ChevronDown size={17}/></summary><p>{answer}</p>
         </details>)}</div>
@@ -105,8 +108,8 @@ export default async function Download() {
     </main>
 
     <footer className="site-footer"><div className="site-container">
-      <a href="/download" className="site-brand"><span><ScanLine size={19}/></span>镜序</a>
-      <nav aria-label="页脚导航"><a href="#product">产品首页</a><a href="#windows">下载</a><a href="#questions">使用帮助</a><a href={workbench}>打开工作台</a></nav>
+      <a href="#top" className="site-brand"><span><ScanLine size={19}/></span>镜序</a>
+      <nav aria-label="页脚导航"><a href="#product">产品介绍</a><a href="#windows">客户端下载</a><a href="#questions">常见问题</a></nav>
     </div></footer>
   </div>;
 }

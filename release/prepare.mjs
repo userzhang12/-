@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { releaseManifest } from '../web/app/download/manifest.mjs';
+import { releaseManifest } from '../web/app/(site)/manifest.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { version } = JSON.parse(await readFile(join(root, 'desktop/package.json'), 'utf8'));

@@ -1,7 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { build, Platform, Arch } = require('electron-builder');
-const { endpoint } = require('../policy.cjs');
+const { endpoint, workbenchEndpoint } = require('../policy.cjs');
 const { version } = require('../package.json');
 
 const root = path.resolve(__dirname, '..');
@@ -13,7 +13,7 @@ async function main() {
       (channel === 'beta') !== version.includes('-beta.')) {
     throw new Error('正式版使用 X.Y.Z，内测版使用 X.Y.Z-beta.N');
   }
-  const appUrl = endpoint(process.env.JINGXU_APP_URL).href;
+  const appUrl = workbenchEndpoint(process.env.JINGXU_APP_URL).href;
   const releaseRoot = endpoint(process.env.JINGXU_RELEASE_ROOT);
   releaseRoot.pathname = releaseRoot.pathname.replace(/\/?$/, '/');
   const feed = new URL(channel + '/', releaseRoot).href;

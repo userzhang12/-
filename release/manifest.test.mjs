@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { releaseManifest } from '../web/app/download/manifest.mjs';
+import { releaseManifest } from '../web/app/(site)/manifest.mjs';
 
 const sample = {
   version: '0.1.0', channel: 'stable', file: 'jingxu-setup-0.1.0-x64.exe',

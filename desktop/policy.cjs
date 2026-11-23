@@ -8,6 +8,12 @@ function endpoint(value, allowLoopback = false) {
   return url;
 }
 
+function workbenchEndpoint(value, allowLoopback = false) {
+  const url = endpoint(value, allowLoopback);
+  if (url.pathname === '/' || /^\/download\/?$/.test(url.pathname)) url.pathname = '/workbench';
+  return url;
+}
+
 function allowsNavigation(value, origin) {
   try {
     const url = new URL(value);
@@ -26,4 +32,4 @@ function downloadName(value) {
   return basename;
 }
 
-module.exports = { endpoint, allowsNavigation, downloadName };
+module.exports = { endpoint, workbenchEndpoint, allowsNavigation, downloadName };

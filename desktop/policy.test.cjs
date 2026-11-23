@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { endpoint, allowsNavigation, downloadName } = require('./policy.cjs');
+const { endpoint, workbenchEndpoint, allowsNavigation, downloadName } = require('./policy.cjs');
 
 test('packaged service and update feeds require HTTPS', () => {
   assert.equal(endpoint('https://app.example.com/').origin, 'https://app.example.com');
@@ -9,6 +9,14 @@ test('packaged service and update feeds require HTTPS', () => {
     assert.throws(() => endpoint(url));
   }
   assert.throws(() => endpoint('http://example.com', true));
+});
+
+test('installation URLs open the workbench even with a public site URL in the configuration', () => {
+  for (const path of ['/', '/download', '/download/', '/workbench']) {
+    assert.equal(workbenchEndpoint('https://app.example.com' + path).href, 'https://app.example.com/workbench');
+  }
+  assert.equal(workbenchEndpoint('http://localhost:3000', true).pathname, '/workbench');
+  assert.throws(() => workbenchEndpoint('http://app.example.com/'));
 });
 
 test('desktop window stays inside the configured service boundary', () => {

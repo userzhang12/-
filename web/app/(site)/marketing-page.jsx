@@ -2,13 +2,11 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, FileText, Monitor, ScanLine } from 'lucide-react';
 import { releaseManifest } from './manifest.mjs';
-import './download.css';
 
 export const metadata = {
   title: '镜序 · AI 商品短剧制作软件',
   description: '镜序面向商家与内容团队，帮助你从商品资料、剧本和分镜制作带配音的竖屏短剧。',
 };
-export const dynamic = 'force-dynamic';
 
 function downloadRoot() {
   try {

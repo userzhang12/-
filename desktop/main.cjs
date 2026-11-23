@@ -1,11 +1,11 @@
 const { app, BrowserWindow, dialog, ipcMain, session } = require('electron');
 const path = require('node:path');
-const { endpoint, allowsNavigation, downloadName } = require('./policy.cjs');
+const { workbenchEndpoint, allowsNavigation, downloadName } = require('./policy.cjs');
 
 const settings = app.isPackaged
   ? require('./distribution.json')
   : { appUrl: process.env.JINGXU_APP_URL || 'http://127.0.0.1:3000/workbench', channel: 'dev' };
-const target = endpoint(settings.appUrl, !app.isPackaged);
+const target = workbenchEndpoint(settings.appUrl, !app.isPackaged);
 const origin = target.origin;
 let window;
 let updater;

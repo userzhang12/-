@@ -49,4 +49,5 @@ python -m api.worker &
 pids+=("$!")
 node web/node_modules/next/dist/bin/next start web --hostname 0.0.0.0 --port "$web_port" &
 pids+=("$!")
+printf "镜序官网  http://localhost:%s/\n镜序工作台  http://localhost:%s/workbench\n" "$web_port" "$web_port"
 wait -n "${pids[@]}"

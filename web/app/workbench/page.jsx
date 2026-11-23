@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import DesktopUpdate from '../desktop-update';
-import Storyboard, { storyboardStill, timecode } from '../storyboard';
-import ProjectOverview from '../project-overview';
+import DesktopUpdate from './desktop-update';
+import Storyboard, { storyboardStill, timecode } from './storyboard';
+import ProjectOverview from './project-overview';
 import {
   ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, Box, Check,
   CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clapperboard, Clock3, Coins,

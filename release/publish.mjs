@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { releaseManifest } from '../web/app/download/manifest.mjs';
+import { releaseManifest } from '../web/app/(site)/manifest.mjs';
 
 const [channel, sourceRoot, destinationRoot] = process.argv.slice(2);
 if (!['stable', 'beta'].includes(channel) || !sourceRoot || !destinationRoot)

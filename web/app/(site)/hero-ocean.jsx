@@ -19,7 +19,9 @@ uniform vec2 pointer;
 uniform float time;
 uniform float immersion;
 
-const vec3 sun = vec3(0.47, 0.085, 0.88);
+uniform vec3 atmosphere;
+vec3 lightDirection;
+vec3 lightTint;
 
 float hash(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * 0.1031);
@@ -37,12 +39,17 @@ float noise(vec2 p) {
 
 vec3 sky(vec3 ray) {
   float elevation = max(0.0, ray.y);
-  vec3 color = mix(vec3(0.31, 0.29, 0.32), vec3(0.033, 0.13, 0.22),
-                   smoothstep(0.0, 0.52, elevation));
-  float facing = max(0.0, dot(ray, sun));
-  color += pow(facing, 11.0) * exp(-elevation * 3.6) * vec3(0.42, 0.21, 0.10);
-  color += pow(facing, 140.0) * vec3(0.64, 0.30, 0.12);
-  color += smoothstep(0.9988, 0.9995, facing) * vec3(1.0, 0.78, 0.42);
+  float daylight = atmosphere.x;
+  float twilight = atmosphere.y;
+  vec3 horizon = mix(vec3(0.075, 0.15, 0.26), vec3(0.60, 0.76, 0.83), daylight);
+  vec3 zenith = mix(vec3(0.012, 0.034, 0.095), vec3(0.10, 0.38, 0.60), daylight);
+  horizon = mix(horizon, vec3(0.55, 0.31, 0.30), twilight);
+  vec3 color = mix(horizon, zenith, smoothstep(0.0, 0.56, elevation));
+  float facing = max(0.0, dot(ray, lightDirection));
+  color += pow(facing, 22.0) * exp(-elevation * 2.0) * lightTint * 0.32;
+  color += pow(facing, 180.0) * lightTint * 0.42;
+  float disc = smoothstep(0.9990, 0.99955, facing);
+  color += disc * lightTint;
   return color;
 }
 
@@ -80,10 +87,11 @@ vec3 ocean(vec3 ray) {
   vec3 reflection = reflect(ray, normal);
   reflection.y = abs(reflection.y);
   float fresnel = 0.085 + 0.78 * pow(1.0 - max(0.0, dot(normal, -ray)), 4.0);
-  vec3 color = mix(vec3(0.014, 0.105, 0.137), sky(reflection), fresnel);
-  float facing = max(0.0, dot(reflection, sun));
-  color += pow(facing, 44.0) * vec3(0.66, 0.34, 0.15);
-  color += pow(facing, 220.0) * vec3(0.62, 0.45, 0.26);
+  vec3 water = mix(vec3(0.009, 0.065, 0.113), vec3(0.025, 0.235, 0.28), atmosphere.x);
+  vec3 color = mix(water, sky(reflection), fresnel);
+  float facing = max(0.0, dot(reflection, lightDirection));
+  color += pow(facing, 44.0) * lightTint * 0.69;
+  color += pow(facing, 220.0) * lightTint * 0.6;
   float horizonFog = smoothstep(18.0, 62.0, distance);
   return mix(color, sky(normalize(vec3(ray.x, 0.0, ray.z))) * 0.73, horizonFog);
 }
@@ -106,6 +114,10 @@ void main() {
   vec2 view = (uv - vec2(0.5, 0.53)) * vec2(aspect, 1.0);
   vec3 ray = normalize(vec3(view.x * 1.18 + pointer.x * 0.045,
                             view.y * 1.06 + pointer.y * 0.028, 1.0));
+  float night = (1.0 - atmosphere.x) * (1.0 - atmosphere.y);
+  lightDirection = normalize(vec3(min(0.71, aspect * 0.40), atmosphere.z, 1.0));
+  lightTint = mix(vec3(0.43, 0.68, 1.0), vec3(1.0, 0.91, 0.70), atmosphere.x);
+  lightTint = mix(lightTint, vec3(1.0, 0.57, 0.29), atmosphere.y);
   vec3 color = sky(ray);
   if (ray.y < 0.0) {
     color = mix(color * 0.73, ocean(ray), smoothstep(0.0, 0.018, -ray.y));
@@ -113,6 +125,12 @@ void main() {
     vec2 cloud = vec2(view.x * 3.2, view.y * 17.0) + vec2(time * 0.024, 0.0);
     float veil = smoothstep(0.42, 0.83, noise(cloud) * 0.68 + noise(cloud * 2.1) * 0.32);
     color = mix(color, color * 0.60, veil * smoothstep(0.015, 0.11, ray.y));
+    vec2 starGrid = view * 137.0;
+    float starSeed = hash(floor(starGrid));
+    float star = (1.0 - smoothstep(0.07, 0.24, length(fract(starGrid) - 0.5)));
+    float twinkle = 0.76 + 0.24 * sin(time * 1.25 + starSeed * 164.0);
+    color += step(0.984, starSeed) * star * twinkle * night
+           * smoothstep(0.04, 0.20, ray.y) * (1.0 - veil * 0.72) * vec3(0.59, 0.73, 0.96);
   }
   if (immersion > 0.0) color = mix(color, belowSurface(uv), immersion);
   float vignette = 1.0 - 0.27 * dot(uv - 0.5, uv - 0.5);
@@ -131,17 +149,47 @@ function compile(gl, type, source) {
   return null;
 }
 
+// Hours are local to the visitor. The endpoints match so midnight stays continuous.
+const lighting = [
+  [0, 0, 0, 0.32], [5, 0, 0, 0.18], [6, 0.12, 1, 0.055],
+  [8, 0.88, 0.18, 0.21], [12, 1, 0, 0.36], [16, 0.92, 0.12, 0.27],
+  [18, 0.32, 1, 0.085], [19, 0.06, 0.65, 0.09], [21, 0, 0, 0.18],
+  [24, 0, 0, 0.32],
+];
+
+function localLighting() {
+  const now = new Date();
+  const hour = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+  const right = lighting.findIndex(([boundary]) => hour < boundary);
+  const [start, ...from] = lighting[right - 1];
+  const [end, ...to] = lighting[right];
+  const fraction = (hour - start) / (end - start);
+  const ease = fraction * fraction * (3 - 2 * fraction);
+  return from.map((value, index) => value + (to[index] - value) * ease);
+}
+
 export default function HeroOcean() {
   const surface = useRef(null);
 
   useEffect(() => {
     const canvas = surface.current;
     const hero = canvas.parentElement;
+    function syncClock() {
+      light = localLighting();
+      hero.style.setProperty('--ocean-night', (1 - light[0]) * (1 - light[1]));
+    }
+    let light;
+    syncClock();
+    const clock = window.setInterval(syncClock, 15000);
+    const stopClock = () => {
+      window.clearInterval(clock);
+      hero.style.removeProperty('--ocean-night');
+    };
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (reducedMotion.matches) return;
+    if (reducedMotion.matches) return stopClock;
 
     const gl = canvas.getContext('webgl', { antialias: false, alpha: false, powerPreference: 'low-power' });
-    if (!gl) return;
+    if (!gl) return stopClock;
 
     const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
     const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
@@ -155,14 +203,14 @@ export default function HeroOcean() {
     };
     if (!vertex || !fragment || !program || !buffer) {
       dispose();
-      return;
+      return stopClock;
     }
     gl.attachShader(program, vertex);
     gl.attachShader(program, fragment);
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
       dispose();
-      return;
+      return stopClock;
     }
     gl.useProgram(program);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -174,6 +222,7 @@ export default function HeroOcean() {
     const pointer = gl.getUniformLocation(program, 'pointer');
     const time = gl.getUniformLocation(program, 'time');
     const immersion = gl.getUniformLocation(program, 'immersion');
+    const atmosphere = gl.getUniformLocation(program, 'atmosphere');
 
     let visible = false;
     let frame = 0;
@@ -195,6 +244,7 @@ export default function HeroOcean() {
         gl.uniform2f(pointer, x, y);
         gl.uniform1f(time, elapsed);
         gl.uniform1f(immersion, depth);
+        gl.uniform3f(atmosphere, ...light);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         canvas.dataset.ready = 'true';
       }
@@ -202,6 +252,7 @@ export default function HeroOcean() {
     }
 
     function update() {
+      syncClock();
       const active = visible && !document.hidden && !reducedMotion.matches && !gl.isContextLost();
       if (!active && frame) {
         cancelAnimationFrame(frame);
@@ -252,6 +303,7 @@ export default function HeroOcean() {
     canvas.addEventListener('webglcontextlost', update);
 
     return () => {
+      stopClock();
       cancelAnimationFrame(frame);
       size.disconnect();
       intersection.disconnect();

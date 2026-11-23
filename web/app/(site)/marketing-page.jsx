@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, FileText, Monitor, ScanLine } from 'lucide-react';
 import HeroOcean from './hero-ocean';
+import SharkIntro from './shark-intro';
 import ProductPreview from './product-preview';
 import { releaseManifest } from './manifest.mjs';
 
@@ -58,6 +59,7 @@ export default async function Download() {
     <main id="top">
       <section className="site-hero" aria-labelledby="site-title">
         <HeroOcean/>
+        <SharkIntro/>
         <div className="site-container site-hero-inner">
           <div className="site-hero-copy">
             <p className="site-kicker">镜序 · AI 商品短剧制作软件</p>
@@ -70,7 +72,7 @@ export default async function Download() {
             </div>
             <p className="site-system">{system}</p>
           </div>
-          <ProductPreview/>
+          <div className="site-hero-preview"><ProductPreview/></div>
         </div>
       </section>
 

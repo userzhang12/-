@@ -12,6 +12,7 @@ web/.next/
 desktop/node_modules/
 desktop/distribution.json
 desktop/dist/
+desktop/dist-test/
 deploy/production.env
 deploy/service.env
 deploy/published/

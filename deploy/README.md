@@ -34,6 +34,8 @@ sudo bash deploy/bootstrap-local.sh
 
 ## Windows 安装包
 
+免费签名的项目资料和 Codex 交接提示词见 [SignPath 申请稿](signpath-application.md)。
+
 - 首版目标为 Windows 10/11 x64。客户端访问可信 HTTPS 工作台，模型、队列和 Python/FFmpeg 留在服务器。
 - 在 GitHub 配置 `desktop-beta` 与 `desktop-stable` 两个 Environment。各自配置变量 `JINGXU_APP_URL=https://域名/workbench`、`JINGXU_RELEASE_ROOT=https://域名/desktop/`、`JINGXU_SIGNER_NAME=签名证书主体通用名称`。配置相应签名凭据 `WINDOWS_CSC_LINK` 与 `WINDOWS_CSC_KEY_PASSWORD`。当前流程要求可供 CI 使用的 Windows 代码签名证书；只支持硬件托管签名的证书需要接入其签名服务。
 - 修改 `desktop/package.json` 和锁文件中的版本。正式版使用 `X.Y.Z`，内测版使用 `X.Y.Z-beta.N`。维护 `release/notes.md` 并在 GitHub Actions 手工触发 **Build signed Jingxu for Windows**。CI 检查客户端程序和安装器的 Authenticode 签名后，生成对应渠道的安装包、差分文件、更新清单和官网清单。
@@ -45,6 +47,18 @@ node release/publish.mjs stable /path/to/unpacked-artifact deploy/published
 ```
 
 官网会显示正式版版本说明、安装包 SHA-256 和下载入口。首次安装前请核对 Windows 所显示的发布者。客户端启动时和运行期间定期检查更新，用户可选择下载及重启安装；下载任务进行时会提示等待。安装前应保存编辑内容。已提交的云端渲染在客户端退出后继续运行。
+
+### 本地 Windows 测试包
+
+在仓库根目录安装桌面端依赖，并设置工作台地址后构建。PowerShell 示例：
+
+```powershell
+npm --prefix desktop ci
+$env:JINGXU_APP_URL = 'https://jingxu.shop/workbench'
+npm --prefix desktop run build:win:test
+```
+
+测试安装包输出到 `desktop/dist-test/`，与正式版使用独立安装标识，关闭自动更新。测试包未签名，仅用于受控设备上的安装和功能验收。
 
 ## 发版验收
 

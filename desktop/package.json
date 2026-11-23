@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "electron .",
     "test": "node --test",
-    "build:win": "node scripts/build-win.cjs"
+    "build:win": "node scripts/build-win.cjs",
+    "build:win:test": "node scripts/build-win.cjs --test"
   },
   "dependencies": { "electron-updater": "6.8.11" },
   "devDependencies": { "electron": "45.4.1", "electron-builder": "26.18.0" }

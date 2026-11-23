@@ -18,6 +18,7 @@ uniform vec2 resolution;
 uniform vec2 pointer;
 uniform float time;
 uniform float immersion;
+uniform float patrolAge;
 
 uniform vec3 atmosphere;
 vec3 lightDirection;
@@ -108,6 +109,39 @@ vec3 belowSurface(vec2 uv) {
                                   + vec3(0.025, 0.17, 0.20) * ceiling;
 }
 
+// Several independent time scales give the shark slow turns and uneven dives.
+vec2 patrolPosition(float t) {
+  return vec2(0.49 + 0.23 * sin(t * 0.24 + 2.38) + 0.086 * sin(t * 0.49 + 2.2),
+              0.36 + 0.047 * sin(t * 0.32 + 1.6) + 0.031 * sin(t * 0.17));
+}
+
+vec3 finAndWake(vec3 water, vec2 uv, float aspect, float age) {
+  vec2 center = patrolPosition(age);
+  vec2 velocity = patrolPosition(age + 0.1) - patrolPosition(age - 0.1);
+  float heading = velocity.x < 0.0 ? -1.0 : 1.0;
+  float distance = smoothstep(0.29, 0.44, center.y);
+  float dive = smoothstep(-0.35, 0.24, sin(age * 0.47 + sin(age * 0.19) + 1.7));
+  float appear = smoothstep(0.25, 1.6, age);
+  vec2 p = (uv - center) * vec2(aspect, 1.0);
+  float width = mix(0.025, 0.046, distance) * mix(0.54, 1.0, smoothstep(0.0, 0.011, abs(velocity.x)));
+  float finX = p.x * heading / width;
+  float leading = smoothstep(-0.52, 0.70, finX);
+  float trailing = 1.0 - smoothstep(-0.09, 0.73, finX);
+  float height = width * 0.68 * leading * trailing * dive;
+  float edge = 1.5 / resolution.y;
+  float fin = smoothstep(-edge, edge * 0.65, p.y + 0.0007)
+             * (1.0 - smoothstep(height - edge, height + edge, p.y))
+             * smoothstep(0.0015, 0.004, height) * appear;
+  vec3 finColor = mix(vec3(0.021, 0.06, 0.084), vec3(0.085, 0.19, 0.23), atmosphere.x);
+  finColor += smoothstep(0.64, 1.0, p.y / max(height, 0.001)) * lightTint * 0.054;
+  float behind = -p.x * heading;
+  float wakeWidth = 0.003 + max(0.0, behind) * 0.14;
+  float wake = exp(-abs(abs(p.y) - wakeWidth) * 410.0)
+             * smoothstep(0.0, 0.012, behind) * (1.0 - smoothstep(0.044, 0.13, behind));
+  wake *= (0.5 + 0.5 * sin(behind * 182.0 - time * 4.8)) * appear * mix(0.22, 0.8, dive);
+  return mix(water + lightTint * wake * 0.15, finColor, fin * 0.92);
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / resolution;
   float aspect = resolution.x / resolution.y;
@@ -132,6 +166,7 @@ void main() {
     color += step(0.984, starSeed) * star * twinkle * night
            * smoothstep(0.04, 0.20, ray.y) * (1.0 - veil * 0.72) * vec3(0.59, 0.73, 0.96);
   }
+  if (patrolAge >= 0.0 && ray.y < 0.0) color = finAndWake(color, uv, aspect, patrolAge);
   if (immersion > 0.0) color = mix(color, belowSurface(uv), immersion);
   float vignette = 1.0 - 0.27 * dot(uv - 0.5, uv - 0.5);
   color = color * vignette + (hash(gl_FragCoord.xy) - 0.5) * 0.009;
@@ -223,6 +258,7 @@ export default function HeroOcean() {
     const time = gl.getUniformLocation(program, 'time');
     const immersion = gl.getUniformLocation(program, 'immersion');
     const atmosphere = gl.getUniformLocation(program, 'atmosphere');
+    const patrolAge = gl.getUniformLocation(program, 'patrolAge');
 
     let visible = false;
     let frame = 0;
@@ -233,6 +269,7 @@ export default function HeroOcean() {
     let y = 0;
     let depth = 0;
     let elapsed = 0;
+    let patrolStarted = null;
 
     function draw(now) {
       frame = 0;
@@ -245,6 +282,9 @@ export default function HeroOcean() {
         gl.uniform1f(time, elapsed);
         gl.uniform1f(immersion, depth);
         gl.uniform3f(atmosphere, ...light);
+        if (hero.dataset.sharkPatrol) patrolStarted ??= elapsed;
+        else patrolStarted = null;
+        gl.uniform1f(patrolAge, patrolStarted === null ? -1 : elapsed - patrolStarted);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         canvas.dataset.ready = 'true';
       }

@@ -15,20 +15,22 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import select, text as sql_text
 
 from . import assets, config, script, security, voice
-from .store import (digest, engine, init, invites, jobs, lookup, memberships, now, operators, password_hash, project_row,
+from .store import (digest, engine, init, invites, jobs, lookup, memberships, now, operators, password_hash, preview_invites, project_row,
                     projects, save_project, sessions, trends, uid, users, verifies, workspaces, write)
 
 BUDGET = 4950
 LIMITS = {"script": 150, "frame": 800, "clip": 3000, "export": 400, "retry": 600}
 LOCAL_PRICES = {"script": 10, "frame": 30, "clip": 200, "export": 60}
 LIVE = config.live_enabled()
-DEMO = not LIVE and os.getenv("JINGXU_DEMO", "1") == "1"
+INVITE_PREVIEW = config.invite_preview_enabled()
+DEMO = not INVITE_PREVIEW and not LIVE and os.getenv("JINGXU_DEMO", "1") == "1"
 SESSION_AGE = 86400 * 7
 LINK_TTL = 300
 
 
 @asynccontextmanager
 async def lifespan(_):
+    config.check_invite_preview()
     init()
     with write() as connection:
         if DEMO and not lookup(connection, workspaces, workspaces.c.id == "demo"):
@@ -150,12 +152,13 @@ def get_session(access: Access):
         choices = workspace_choices(connection, access)
     record = next(row for row in choices if row["id"] == access.workspace)
     return {"workspace": access.workspace, "name": record["name"], "admin": access.admin, "role": access.role,
-            "email": access.email, "live": LIVE, "operator": is_operator(access.email), "workspaces": choices,
-            "canCreateWorkspace": any(row["role"] == "owner" for row in choices)}
+            "email": access.email, "live": LIVE, "invitePreview": INVITE_PREVIEW, "operator": is_operator(access.email), "workspaces": choices,
+            "canCreateWorkspace": not INVITE_PREVIEW and any(row["role"] == "owner" for row in choices)}
 
 
 @app.post("/api/workspaces", status_code=201)
 def create_workspace(body: dict, access: Access):
+    need(not INVITE_PREVIEW, "预览账号使用独立工作空间", 403)
     name = text(body.get("name", ""), 60, True)
     with write() as connection:
         owner = lookup(connection, memberships, (memberships.c.email == access.email) & (memberships.c.role == "owner"))
@@ -168,6 +171,7 @@ def create_workspace(body: dict, access: Access):
 
 @app.post("/api/workspaces/join")
 def join_workspace(body: dict, access: Access, request: Request):
+    need(not INVITE_PREVIEW, "预览账号使用独立工作空间", 403)
     security.limit_request(request, "join", 15)
     need(access.email != "demo", "请登录后加入工作空间", 403)
     code = text(body.get("code", ""), 150, True)
@@ -203,17 +207,26 @@ def register(body: dict, response: Response, request: Request):
     need(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) and len(password) >= 10, "邮箱无效或密码少于 10 字符")
     with write() as connection:
         need(not lookup(connection, users, users.c.email == email), "邮箱已注册", 409)
-        invitation = lookup(connection, invites, invites.c.id == digest(code), True)
-        if invitation and invitation["expires"] > now():
-            need(not operator_address(email), "该邮箱需要平台运营注册码", 403)
-            workspace, admin = invitation["workspace"], False
-            connection.execute(invites.delete().where(invites.c.id == invitation["id"]))
-        else:
-            bootstrap = os.getenv("JINGXU_OPERATOR_CODE" if operator_address(email) else "JINGXU_WORKSPACE_CODE")
-            need(bootstrap and hmac.compare_digest(digest(bootstrap), digest(code)), "邀请码无效", 403)
+        if INVITE_PREVIEW:
+            invitation = lookup(connection, preview_invites, preview_invites.c.id == digest(code), True)
+            need(invitation and not invitation["used"] and invitation["expires"] > now(),
+                 "预览邀请码无效、已使用或已过期", 403)
+            connection.execute(preview_invites.update().where(preview_invites.c.id == invitation["id"]).values(used=True))
             workspace, admin = uid(), True
-            connection.execute(workspaces.insert().values(id=workspace, name=text(body.get("workspace", "镜序工作室"), 60, True),
-                                                           quota=int(os.getenv("JINGXU_WORKSPACE_QUOTA_CENTS", "50000"))))
+            name = text(body.get("workspace", "镜序预览空间"), 60, True)
+            connection.execute(workspaces.insert().values(id=workspace, name=name, quota=5000))
+        else:
+            invitation = lookup(connection, invites, invites.c.id == digest(code), True)
+            if invitation and invitation["expires"] > now():
+                need(not operator_address(email), "该邮箱需要平台运营注册码", 403)
+                workspace, admin = invitation["workspace"], False
+                connection.execute(invites.delete().where(invites.c.id == invitation["id"]))
+            else:
+                bootstrap = os.getenv("JINGXU_OPERATOR_CODE" if operator_address(email) else "JINGXU_WORKSPACE_CODE")
+                need(bootstrap and hmac.compare_digest(digest(bootstrap), digest(code)), "邀请码无效", 403)
+                workspace, admin = uid(), True
+                connection.execute(workspaces.insert().values(id=workspace, name=text(body.get("workspace", "镜序工作室"), 60, True),
+                                                               quota=int(os.getenv("JINGXU_WORKSPACE_QUOTA_CENTS", "50000"))))
         need(workspace != "demo", "请先创建独立工作空间", 403)
         connection.execute(users.insert().values(email=email, password=password_hash(password), workspace=workspace, admin=admin))
         connection.execute(memberships.insert().values(workspace=workspace, email=email, role="owner" if admin else "member"))
@@ -285,6 +298,7 @@ def update_quota(workspace_id: str, body: dict, access: Access):
 
 @app.post("/api/workspace/invites")
 def invite(access: Access):
+    need(not INVITE_PREVIEW, "预览邀请码仅由部署管理员发放", 403)
     workspace = access.workspace
     need(access.admin and workspace != "demo", "邀请需要独立管理员账号", 403)
     code = uid()

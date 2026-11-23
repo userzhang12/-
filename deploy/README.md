@@ -60,6 +60,24 @@ npm --prefix desktop run build:win:test
 
 测试安装包输出到 `desktop/dist-test/`，与正式版使用独立安装标识，关闭自动更新。测试包未签名，仅用于受控设备上的安装和功能验收。
 
+## 零签名费邀请预览
+
+用独立的预览部署、数据库和域名。预览供真实 Windows 安装和基础流程验收。启用后 API 和 Worker 只用本地剧本模板、参考图、离线配音和 FFmpeg。启动时会检查并拒绝模型、远程配音、对象存储及远程资料源配置。现有服务器的存储、带宽和计算仍会消耗资源。
+
+1. 在预览部署的 `deploy/service.env` 设置 `JINGXU_INVITE_PREVIEW=1`。从示例配置开始，保持付费模型、远程配音、S3、远程商品与热点来源，以及平台运营账号配置为空。使用独立数据卷和有效 HTTPS，再按本手册的部署步骤启动服务。
+2. 在预览部署所在仓库执行下面的命令，起步发 5 个邀请码。每个码 24 小时内可用一次，每位测试者注册时会获得独立工作空间。已注册人数和未使用的有效码合计最多 10，工作空间初始额度为 5000 模拟分。
+
+   ```bash
+   sudo docker compose --env-file deploy/production.env -f deploy/compose.yml exec -T api python -m api.preview --count 5
+   ```
+
+3. 用预览域名作为 `JINGXU_APP_URL` 构建 Windows 测试包，先在干净的 Windows 电脑验证安装、登录和导出，再私下把安装包和独立邀请码交给测试者。测试包未签名，可能触发 Windows 的发布者提示。官网正式下载清单继续使用签名发布流程。
+4. 想停止接受新测试者时，可撤销尚未使用的码。想结束已注册用户的试用，应停止独立预览环境的 API 和 Worker，保留数据卷。已分发的安装包仍留在用户设备上。
+
+   ```bash
+   sudo docker compose --env-file deploy/production.env -f deploy/compose.yml exec -T api python -m api.preview --revoke-unused
+   ```
+
 ## 发版验收
 
 先将两个连续版本发到内测渠道，用干净 Windows 机器从安装、登录、上传、生成、下载一直走到自动升级。检查任务和账单在升级后仍可查到，并验证旧客户端能与新版 API 共存。等上述流程和实际供应商费用核对完，再晋升正式渠道。云端和 Windows 客户端可以独立发布，但需要保留旧版客户端所依赖的接口和更新文件。

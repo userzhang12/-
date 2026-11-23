@@ -179,6 +179,7 @@ def refresh_trends():
 
 def main():
     logging.basicConfig(level=logging.INFO)
+    config.check_invite_preview()
     init()
     last_refresh = 0
     while True:

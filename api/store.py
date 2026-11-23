@@ -28,6 +28,8 @@ sessions = Table("sessions", schema, Column("id", String, primary_key=True),
                  Column("email", String), Column("expires", Float))
 invites = Table("invites", schema, Column("id", String, primary_key=True),
                 Column("workspace", String), Column("expires", Float))
+preview_invites = Table("preview_invites", schema, Column("id", String, primary_key=True),
+                        Column("expires", Float, nullable=False), Column("used", Boolean, nullable=False))
 projects = Table("projects", schema, Column("id", String, primary_key=True),
                  Column("workspace", String, nullable=False, index=True), Column("data", JSON, nullable=False),
                  Column("updated", Float, nullable=False))

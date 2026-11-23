@@ -126,6 +126,22 @@ def render_settings(project, options):
             "full_dynamic": saved.get("full_dynamic") is True}
 
 
+def invite_preview_enabled():
+    return os.getenv("JINGXU_INVITE_PREVIEW") == "1"
+
+
+def check_invite_preview():
+    if not invite_preview_enabled():
+        return
+    blocked = [name for name in (*PROVIDER_KEYS, "JINGXU_CLOUDFLARE_API_TOKEN",
+        "JINGXU_CLOUDFLARE_VAULT", "S3_BUCKET", "JINGXU_OPERATOR_EMAILS", "JINGXU_OPERATOR_CODE")
+        if os.getenv(name)]
+    blocked.extend(name for name in ("JINGXU_PRODUCT_SOURCES", "JINGXU_TREND_SOURCES")
+                   if os.getenv(name, "").strip() not in ("", "{}"))
+    if blocked:
+        raise ValueError("邀请预览需要本地处理，请移除以下配置 " + ", ".join(blocked))
+
+
 def live_enabled():
     return any(os.getenv(key) for key in PROVIDER_KEYS)
 

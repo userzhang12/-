@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { localLighting } from './ocean-lighting';
 
 const vertexSource = `
 attribute vec2 position;
@@ -172,25 +173,6 @@ function compile(gl, type, source) {
   return null;
 }
 
-// Hours are local to the visitor. The endpoints match so midnight stays continuous.
-const lighting = [
-  [0, 0, 0, 0.32], [5, 0, 0, 0.18], [6, 0.12, 1, 0.055],
-  [8, 0.88, 0.18, 0.21], [12, 1, 0, 0.36], [16, 0.92, 0.12, 0.27],
-  [18, 0.32, 1, 0.085], [19, 0.06, 0.65, 0.09], [21, 0, 0, 0.18],
-  [24, 0, 0, 0.32],
-];
-
-function localLighting() {
-  const now = new Date();
-  const hour = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
-  const right = lighting.findIndex(([boundary]) => hour < boundary);
-  const [start, ...from] = lighting[right - 1];
-  const [end, ...to] = lighting[right];
-  const fraction = (hour - start) / (end - start);
-  const ease = fraction * fraction * (3 - 2 * fraction);
-  return from.map((value, index) => value + (to[index] - value) * ease);
-}
-
 export default function HeroOcean() {
   const surface = useRef(null);
 
@@ -211,8 +193,17 @@ export default function HeroOcean() {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (reducedMotion.matches) return stopClock;
 
+    function staticFallback() {
+      hero.dataset.oceanFallback = 'true';
+      hero.dispatchEvent(new Event('jingxu:oceanfallback'));
+      return () => {
+        delete hero.dataset.oceanFallback;
+        stopClock();
+      };
+    }
+
     const gl = canvas.getContext('webgl', { antialias: false, alpha: false, powerPreference: 'low-power' });
-    if (!gl) return stopClock;
+    if (!gl) return staticFallback();
 
     const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
     const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
@@ -226,14 +217,14 @@ export default function HeroOcean() {
     };
     if (!vertex || !fragment || !program || !buffer) {
       dispose();
-      return stopClock;
+      return staticFallback();
     }
     gl.attachShader(program, vertex);
     gl.attachShader(program, fragment);
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
       dispose();
-      return stopClock;
+      return staticFallback();
     }
     gl.useProgram(program);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -256,9 +247,35 @@ export default function HeroOcean() {
     let y = 0;
     let depth = 0;
     let elapsed = 0;
+    let lastFrame = null;
+    let sampledFrames = 0;
+    let sampleTime = 0;
+    let stableWindows = 0;
+    let quality = 1;
+
+    function measureFrame(now) {
+      const interval = lastFrame === null ? 0 : now - lastFrame;
+      lastFrame = now;
+      // Ignore gaps from restoring a tab or a suspended animation.
+      if (interval <= 0 || interval > 250) return;
+      sampleTime += interval;
+      if (++sampledFrames < 36) return;
+      const average = sampleTime / sampledFrames;
+      sampleTime = sampledFrames = 0;
+      stableWindows = average < 22 ? stableWindows + 1 : 0;
+      const next = average > 38 ? Math.max(.55, quality - .14)
+        : stableWindows >= 3 ? Math.min(1, quality + .10) : quality;
+      if (next === quality) return;
+      stableWindows = 0;
+      quality = next;
+      hero.dataset.oceanQuality = String(quality);
+      resize();
+      hero.dispatchEvent(new Event('jingxu:scenequality'));
+    }
 
     function draw(now) {
       frame = 0;
+      measureFrame(now);
       if (now - previous >= 1000 / 30) {
         elapsed += Math.min(now - previous, 50) / 1000;
         previous = now;
@@ -283,6 +300,8 @@ export default function HeroOcean() {
       if (!active && frame) {
         cancelAnimationFrame(frame);
         frame = 0;
+        lastFrame = null;
+        sampledFrames = sampleTime = stableWindows = 0;
       }
       if (active && !frame) frame = requestAnimationFrame(draw);
       if (reducedMotion.matches || gl.isContextLost()) {
@@ -295,9 +314,13 @@ export default function HeroOcean() {
     function resize() {
       const width = Math.max(1, canvas.clientWidth);
       const height = Math.max(1, canvas.clientHeight);
-      const scale = Math.min(devicePixelRatio, 1.5, 1920 / width, Math.sqrt(1500000 / (width * height)));
-      canvas.width = Math.max(1, Math.round(canvas.clientWidth * scale));
-      canvas.height = Math.max(1, Math.round(canvas.clientHeight * scale));
+      const scale = quality * Math.min(devicePixelRatio, 1.5, 1920 / width, Math.sqrt(1500000 / (width * height)));
+      const renderWidth = Math.max(1, Math.round(width * scale));
+      const renderHeight = Math.max(1, Math.round(height * scale));
+      if (canvas.width !== renderWidth || canvas.height !== renderHeight) {
+        canvas.width = renderWidth;
+        canvas.height = renderHeight;
+      }
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.uniform2f(resolution, canvas.width, canvas.height);
     }
@@ -326,13 +349,19 @@ export default function HeroOcean() {
       visible = entry.isIntersecting;
       update();
     });
-    intersection.observe(hero);
+    intersection.observe(canvas);
     window.addEventListener('scroll', scroll, { passive: true });
     hero.addEventListener('pointermove', move);
     hero.addEventListener('pointerleave', reset);
     document.addEventListener('visibilitychange', update);
     reducedMotion.addEventListener('change', update);
-    canvas.addEventListener('webglcontextlost', update);
+    function onContextLost() {
+      // Keep the current scroll range after a successful initialization.
+      hero.dataset.oceanLost = 'true';
+      update();
+      hero.dispatchEvent(new Event('jingxu:oceanfallback'));
+    }
+    canvas.addEventListener('webglcontextlost', onContextLost);
 
     return () => {
       stopClock();
@@ -346,7 +375,9 @@ export default function HeroOcean() {
       hero.removeEventListener('pointerleave', reset);
       document.removeEventListener('visibilitychange', update);
       reducedMotion.removeEventListener('change', update);
-      canvas.removeEventListener('webglcontextlost', update);
+      canvas.removeEventListener('webglcontextlost', onContextLost);
+      delete hero.dataset.oceanQuality;
+      delete hero.dataset.oceanLost;
       delete canvas.dataset.ready;
       dispose();
     };

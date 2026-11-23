@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { animate } from 'motion';
 import { createSharkJaw } from './shark-jaw';
+import { localLighting } from './ocean-lighting';
 
 const swim = `
 float swimBend(float z, float time) {
@@ -15,7 +16,16 @@ vec3 swimmingPosition(vec3 point, float time) {
 }
 `;
 
-function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, waterline) {
+const skinDetail = `
+float grainField(vec3 point) {
+  float ridge = sin(dot(point, vec3(33.5, 46.0, 105.0)));
+  float grain = sin(dot(point, vec3(139.0, -89.0, 52.0)) + ridge * .76);
+  float skinPatch = sin(dot(point, vec3(17.0, 22.0, -19.0)));
+  return ridge * .32 + grain * .18 + skinPatch * .50;
+}
+`;
+
+function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBlend, waterline) {
   const skin = new three.MeshPhysicalMaterial({
     vertexColors: true,
     transparent: true,
@@ -29,30 +39,52 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, waterl
     shader.uniforms.assembly = assembly;
     shader.uniforms.bite = bite;
     shader.uniforms.submerge = submerge;
-    shader.vertexShader = 'uniform float swimTime; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth;\n' + swim
+    shader.uniforms.rigBlend = rigBlend;
+    shader.vertexShader = 'uniform float swimTime; uniform float rigBlend; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth; varying float jawDrop;\n' + swim
       + shader.vertexShader.replace('#include <beginnormal_vertex>', `
         #include <beginnormal_vertex>
         float slope = (swimBend(position.z + .025, swimTime) - swimBend(position.z - .025, swimTime)) / .05;
-        objectNormal.z -= objectNormal.x * slope;
+        objectNormal.z -= objectNormal.x * slope * (1.0 - rigBlend);
       `).replace('#include <begin_vertex>', `
         #include <begin_vertex>
-        transformed = swimmingPosition(transformed, swimTime);
+        transformed = mix(swimmingPosition(transformed, swimTime), transformed, rigBlend);
         bitePosition = position;
         waterDepth = max(0.0, -(modelMatrix * vec4(transformed, 1.0)).y - 0.12);
         scanPosition = clamp((2.7 - position.z) / 5.4, 0.0, 1.0);
+      `).replace('#include <morphtarget_vertex>', `
+        #include <morphtarget_vertex>
+        jawDrop = max(0.0, position.y - transformed.y);
       `);
-    shader.fragmentShader = 'uniform float swimTime; uniform float assembly; uniform float bite; uniform float submerge; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth;\n'
-      + shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
+    shader.fragmentShader = 'uniform float swimTime; uniform float assembly; uniform float bite; uniform float submerge; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth; varying float jawDrop;\n'
+      + skinDetail + shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
         #include <clipping_planes_fragment>
         float mouthFront = smoothstep(1.35, 2.06, bitePosition.z);
         float mouthWidth = 1.0 - smoothstep(0.43, 0.55, abs(bitePosition.x));
         if (bite > 0.025 && bitePosition.z > 1.30 && mouthWidth > 0.01
-            && bitePosition.y < (-0.17 + 0.25 * mouthFront) * mouthWidth + bite * 0.046) discard;
+            && bitePosition.y < (-0.17 + 0.25 * mouthFront) * mouthWidth + bite * 0.046
+            && (abs(bitePosition.x) < .38 || jawDrop < .27 * bite)) discard;
         if (assembly < 1.0) {
           float coverage = smoothstep(-0.055, 0.10, assembly * 1.17 - scanPosition);
           float grain = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
           if (grain >= coverage) discard;
         }
+      `).replace('#include <roughnessmap_fragment>', `
+        #include <roughnessmap_fragment>
+        float visibleGrain = 1.0 - smoothstep(4.0, 15.0, length(vViewPosition));
+        float skinGrain = grainField(bitePosition);
+        roughnessFactor = clamp(roughnessFactor + skinGrain * .13, .23, .62);
+        diffuseColor.rgb *= 1.0 + (skinGrain * .082) * visibleGrain;
+      `).replace('#include <normal_fragment_maps>', `
+        #include <normal_fragment_maps>
+        vec3 dx = dFdx(-vViewPosition);
+        vec3 dy = dFdy(-vViewPosition);
+        vec3 alongX = cross(dy, normal);
+        vec3 alongY = cross(normal, dx);
+        float determinant = dot(dx, alongX);
+        float microHeight = skinGrain * .0009 * visibleGrain;
+        vec3 gradient = (dFdx(microHeight) * alongX + dFdy(microHeight) * alongY)
+                      * sign(determinant) / max(abs(determinant), 0.000000001);
+        normal = normalize(normal - gradient);
       `).replace('#include <opaque_fragment>', `
         float haze = submerge * smoothstep(0.0, 3.7, waterDepth);
         vec2 ray = bitePosition.xz + vec2(swimTime * .055, 0.0);
@@ -65,11 +97,17 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, waterl
         #include <opaque_fragment>
       `);
   };
+  const jaws = [];
   shark.traverse(object => {
     if (!object.isMesh) return;
+    const target = object.morphTargetDictionary?.JawOpen;
+    if (target !== undefined) jaws.push({ mesh: object, target });
     object.material.dispose();
     object.material = skin;
   });
+  return open => {
+    for (const { mesh, target } of jaws) mesh.morphTargetInfluences[target] = open;
+  };
 }
 
 function makeSurfaceLight(three, shark, MeshSurfaceSampler, swimTime, assembly) {
@@ -191,7 +229,7 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const stage = canvas.parentElement;
   const hero = canvas.closest('.site-hero');
-  if (motion.matches || hero.getBoundingClientRect().bottom < innerHeight * .65) return;
+  if (motion.matches || hero.dataset.oceanFallback || hero.dataset.oceanLost || hero.getBoundingClientRect().bottom < innerHeight * .65) return;
   let renderer;
   try {
     renderer = new three.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'low-power' });
@@ -204,20 +242,42 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const camera = new three.PerspectiveCamera(42, 1, 0.15, 60);
   camera.position.set(0, 0.75, 8);
   camera.lookAt(0, 0.5, 0);
-  scene.add(new three.HemisphereLight(0xc8e8f3, 0x52657b, 1.55));
+  const ambient = new three.HemisphereLight(0xc8e8f3, 0x52657b, 1.55);
   const key = new three.DirectionalLight(0xffe7cc, 2.65);
   key.position.set(4, 5, 3);
   const rim = new three.DirectionalLight(0x8acdea, 2.8);
   rim.position.set(-3, 2, -4);
-  scene.add(key, rim);
+  scene.add(ambient, key, rim);
+  const moon = new three.Color('#9ac7ff');
+  const sun = new three.Color('#fff0d5');
+  const sunset = new three.Color('#ffbe91');
+  function syncLight() {
+    const [day, twilight, elevation] = localLighting();
+    key.color.copy(moon).lerp(sun, day).lerp(sunset, twilight);
+    key.position.set(3.6, 1.3 + elevation * 9, 5.1);
+    key.intensity = 1.45 + day * .75 + twilight * .42;
+    ambient.intensity = 1.02 + day * .38 + twilight * .15;
+    rim.intensity = 2 + day * .52;
+  }
+  syncLight();
+  const lightingTimer = window.setInterval(syncLight, 15000);
   const swimTime = { value: 0 };
   const assembly = { value: 0 };
   const bite = { value: 0 };
   const submerge = { value: 0 };
+  const rigBlend = { value: 0 };
   const waterline = new three.Plane(new three.Vector3(0, 1, 0), .12);
-  applySharkSkin(three, shark, swimTime, assembly, bite, submerge, waterline);
+  const setJawMorph = applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBlend, waterline);
   const surfaceLight = makeSurfaceLight(three, shark, MeshSurfaceSampler, swimTime, assembly);
-  const setOpening = createSharkJaw(three, shark, waterline);
+  const setMouth = createSharkJaw(three, shark, waterline);
+  const spine = ['SwimBody', 'SwimBack', 'SwimPeduncle', 'SwimTail']
+    .map(name => shark.getObjectByName(name)).filter(Boolean);
+  const bend = [.105, .17, .235, .255];
+  const phase = [0, .65, 1.29, 1.95];
+  function setOpening(open) {
+    setJawMorph(open);
+    setMouth(open);
+  }
   scene.add(shark);
 
   const count = 144;
@@ -269,15 +329,20 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   function stop() {
     if (stopped) return;
     stopped = true;
+    window.clearInterval(lightingTimer);
     cancelAnimationFrame(frame);
     observer.disconnect();
     viewport.disconnect();
     document.removeEventListener('visibilitychange', updateVisibility);
     motion.removeEventListener('change', onMotion);
     canvas.removeEventListener('webglcontextlost', stop);
+    hero.removeEventListener('jingxu:scenequality', resize);
+    hero.removeEventListener('jingxu:oceanfallback', stop);
     delete canvas.dataset.playing;
     delete canvas.dataset.patrol;
     scene.traverse(object => {
+      if (object.isInstancedMesh) object.dispose();
+      if (object.isSkinnedMesh) object.skeleton.dispose();
       object.geometry?.dispose();
       object.material?.dispose();
     });
@@ -292,8 +357,9 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
     camera.aspect = width / height;
     camera.fov = camera.aspect < 0.8 ? 69 : 42;
     camera.updateProjectionMatrix();
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25, Math.sqrt(1150000 / (width * height))));
-    renderer.setSize(width, height, false);
+    const quality = Number(hero.dataset.oceanQuality || 1);
+    const ratio = quality * Math.min(devicePixelRatio, 1.25, Math.sqrt(1150000 / (width * height)));
+    renderer.setDrawingBufferSize(width, height, ratio);
   }
 
   function updateVisibility() {
@@ -305,6 +371,7 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
       return;
     }
     if (pausedAt !== null) {
+      syncLight();
       start += performance.now() - pausedAt;
       pausedAt = null;
     }
@@ -330,6 +397,7 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
         const depth = Number(hero.style.getPropertyValue('--ocean-depth'));
         camera.lookAt(0, .5 - depth * (camera.aspect < .8 ? 5.1 : 3.1), 0);
         const entry = three.MathUtils.smoothstep(age, 0, 2.1);
+        rigBlend.value = spine.length === 4 ? three.MathUtils.smoothstep(age, 0, .85) : 0;
         patrolPosition(age, swimTarget);
         patrolPosition(age + .065, swimDirection).sub(swimTarget);
         swimDirection.y *= .48;
@@ -338,6 +406,11 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
         shark.position.copy(patrolOrigin).lerp(swimTarget, entry);
         shark.quaternion.copy(returnHeading).slerp(swimHeading, entry);
         shark.rotateZ((Math.sin(age * .85) * .13 + swimDirection.x * .12) * entry);
+        spine.forEach((bone, index) => {
+          bone.rotation.y = (Math.sin(age * 6.8 - phase[index]) * bend[index]
+            + swimDirection.x * .052) * rigBlend.value;
+          bone.rotation.z = Math.sin(age * 4.1 - phase[index]) * .035 * rigBlend.value;
+        });
         shark.visible = true;
         waterline.constant = 12;
         submerge.value = 1;
@@ -439,6 +512,8 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   resize();
   motion.addEventListener('change', onMotion);
   canvas.addEventListener('webglcontextlost', stop);
+  hero.addEventListener('jingxu:scenequality', resize);
+  hero.addEventListener('jingxu:oceanfallback', stop);
   return stop;
 }
 

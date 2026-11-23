@@ -9,8 +9,14 @@ export function createSharkJaw(three, shark, waterline) {
   const material = (color, roughness) => new three.MeshStandardMaterial({
     color, roughness, side: three.DoubleSide, clippingPlanes: [waterline],
   });
-  const enamel = material('#dedccb', .37);
-  const gum = material('#533239', .61);
+  const enamel = new three.MeshPhysicalMaterial({
+    color: '#f0e5cc', roughness: .29, clearcoat: .24, clearcoatRoughness: .29,
+    side: three.DoubleSide, clippingPlanes: [waterline],
+  });
+  const gum = new three.MeshPhysicalMaterial({
+    color: '#453138', roughness: .47, clearcoat: .20, clearcoatRoughness: .38,
+    side: three.DoubleSide, clippingPlanes: [waterline],
+  });
   const shade = material('#20141b', .85);
   shade.emissive.set('#2e1820');
   shade.emissiveIntensity = .22;
@@ -65,19 +71,25 @@ export function createSharkJaw(three, shark, waterline) {
   ], 3));
   tooth.setIndex([0,1,5,1,2,5,2,3,5,3,4,5,4,0,5,0,4,6,4,3,6,3,2,6,2,1,6,1,0,6]);
   tooth.computeVertexNormals();
+  const toothTransform = new three.Object3D();
+  const toothTint = new three.Color();
   for (const [parent, arch, bottom] of [[mouth, upperArch, false], [lower, innerLip, true]]) {
+    const row = new three.InstancedMesh(tooth, enamel, 15);
     for (let index = 0; index < 15; index++) {
       const t = (index + .5) / 15;
       const point = arch.getPointAt(t);
       const tangent = arch.getTangentAt(t);
-      const mesh = new three.Mesh(tooth, enamel);
-      mesh.position.copy(point);
-      mesh.position.y += bottom ? .022 : -.028;
-      mesh.rotation.y = Math.atan2(-tangent.z, tangent.x);
-      if (bottom) mesh.rotateZ(Math.PI);
-      mesh.scale.setScalar((.70 + .31 * Math.sin(t * Math.PI)) * (bottom ? .76 : .92) * (.94 + .11 * Math.sin(index * 3.4)));
-      parent.add(mesh);
+      toothTransform.position.copy(point);
+      toothTransform.position.y += bottom ? .022 : -.028;
+      toothTransform.rotation.set(0, Math.atan2(-tangent.z, tangent.x), 0);
+      if (bottom) toothTransform.rotateZ(Math.PI);
+      toothTransform.scale.setScalar((.70 + .31 * Math.sin(t * Math.PI)) * (bottom ? .76 : .92) * (.94 + .11 * Math.sin(index * 3.4)));
+      toothTransform.updateMatrix();
+      row.setMatrixAt(index, toothTransform.matrix);
+      toothTint.setRGB(.84 + .12 * Math.sin(t * Math.PI), .87 + .09 * Math.sin(t * Math.PI), .91);
+      row.setColorAt(index, toothTint);
     }
+    parent.add(row);
   }
 
   const lowerPoint = new three.Vector3();

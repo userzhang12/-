@@ -16,3 +16,13 @@ test('release manifest accepts only the installer belonging to its channel and v
   assert.throws(() => releaseManifest({ ...sample, sha256: 'none' }, 'stable'));
   assert.throws(() => releaseManifest({ ...sample, bytes: -1 }, 'stable'));
 });
+
+test('unsigned preview filename cannot be used in a signed release manifest', async () => {
+  const { previewManifest } = await import('../web/app/(site)/manifest.mjs');
+  const preview = { ...sample, channel: 'preview', file: 'jingxu-test-setup-0.1.0-x64.exe' };
+  assert.equal(previewManifest(preview).file, preview.file);
+  assert.throws(() => previewManifest(sample));
+  assert.throws(() => previewManifest({ ...preview, file: '../' + preview.file }));
+  assert.throws(() => releaseManifest(preview, 'stable'));
+  assert.throws(() => releaseManifest(preview, 'preview'));
+});

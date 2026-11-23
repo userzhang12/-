@@ -78,6 +78,18 @@ npm --prefix desktop run build:win:test
    sudo docker compose --env-file deploy/production.env -f deploy/compose.yml exec -T api python -m api.preview --revoke-unused
    ```
 
+### 在官网开放预览包下载
+
+验证在真实 Windows 上可以安装、登录和导出，并启用上面的邀请预览后，可把未签名测试包放到 Caddy 与 Web 共同挂载的发布目录。默认目录为 `deploy/published/preview/`，使用自定义 `JINGXU_RELEASE_STORAGE` 时在对应目录下创建 `preview/`。
+
+从仓库根目录生成清单。若服务器没有 Node.js，可在构建安装包的电脑上生成 JSON，再一并上传。
+
+```bash
+node release/preview.mjs /path/to/jingxu-test-setup-0.1.0-x64.exe > preview-release.json
+```
+
+先将安装包放入 `preview/`，检查文件大小和 SHA-256，再将清单放入同一目录并命名为 `release.json`。官网在正式版尚未发布、清单和文件匹配时显示预览下载，并提示未签名、账号需邀请码。正式更新清单仅用于已签名的稳定版或内测版。撤下预览时移出清单及安装包，并保留已下载副本可能继续存在的预期。
+
 ## 发版验收
 
 先将两个连续版本发到内测渠道，用干净 Windows 机器从安装、登录、上传、生成、下载一直走到自动升级。检查任务和账单在升级后仍可查到，并验证旧客户端能与新版 API 共存。等上述流程和实际供应商费用核对完，再晋升正式渠道。云端和 Windows 客户端可以独立发布，但需要保留旧版客户端所依赖的接口和更新文件。

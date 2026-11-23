@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, FileText, Monitor, ScanLine } from 'lucide-react';
 import HeroOcean from './hero-ocean';
 import SharkIntro from './shark-intro';
 import ProductPreview from './product-preview';
-import { releaseManifest } from './manifest.mjs';
+import { previewManifest, releaseManifest } from './manifest.mjs';
 
 export const metadata = {
   title: '镜序 · AI 商品短剧制作软件',
@@ -37,6 +37,19 @@ async function currentRelease(root) {
   }
 }
 
+async function currentPreview() {
+  const directory = process.env.JINGXU_RELEASE_DIR;
+  if (!directory) return null;
+  try {
+    const path = join(directory, 'preview');
+    const manifest = previewManifest(JSON.parse(await readFile(join(path, 'release.json'), 'utf8')));
+    const installer = await stat(join(path, manifest.file));
+    return installer.isFile() && installer.size === manifest.bytes ? manifest : null;
+  } catch {
+    return null;
+  }
+}
+
 const questions = [
   ['镜序支持哪些系统？', '首发客户端面向 Windows 10 和 Windows 11 的 x64 电脑。'],
   ['安装后需要注册账号吗？', '需要。镜序目前采用邀请制，用邮箱和邀请码注册后可以加入工作空间。'],
@@ -46,8 +59,10 @@ const questions = [
 export default async function Download() {
   const root = downloadRoot();
   const release = root ? await currentRelease(root) : null;
-  const installer = release && new URL('stable/' + release.file, root).href;
-  const system = 'Windows 10 / 11 · x64' + (release ? ' · v' + release.version : '');
+  const preview = root && !release ? await currentPreview() : null;
+  const installer = release ? new URL('stable/' + release.file, root).href
+    : preview ? new URL('preview/' + preview.file, root).href : null;
+  const system = 'Windows 10 / 11 · x64' + (release || preview ? ' · v' + (release || preview).version : '');
 
   return <div className="download-site">
     <header className="site-header"><div className="site-container site-nav">
@@ -72,7 +87,7 @@ export default async function Download() {
             <h1 id="site-title">从商品资料到<br/><em>带配音的竖屏短剧</em></h1>
             <p className="site-summary">生成剧本，逐镜调整台词和画面，合成带字幕的 9:16 成片。</p>
             <div className="site-hero-actions">
-              {installer ? <a className="site-action primary-action" href={installer}><ArrowDownToLine size={18}/> 下载 Windows 版</a> :
+              {installer ? <a className="site-action primary-action" href={preview ? "#windows" : installer}><ArrowDownToLine size={18}/> {preview ? "获取 Windows 预览版" : "下载 Windows 版"}</a> :
                 <a className="site-action primary-action" href="#windows"><ArrowDown size={17}/> Windows 版待发布</a>}
               <a className="site-action secondary-action" href="#product">了解制作流程</a>
             </div>
@@ -98,9 +113,14 @@ export default async function Download() {
         <div className="site-download">
           <div><h2 id="download-title">下载镜序</h2><p>{system}</p></div>
           <div className="site-download-info">
-            {installer ? <><a className="site-action primary-action" href={installer}><ArrowDownToLine size={17}/> 下载 .exe 安装包</a>
+            {release ? <><a className="site-action primary-action" href={installer}><ArrowDownToLine size={17}/> 下载 .exe 安装包</a>
               <p>发布于 {release.published} · {(release.bytes / 1024 / 1024).toFixed(1)} MB</p>
               <details id="release"><summary>版本说明和安装包校验值</summary><p className="release-notes">{release.notes}</p><code>SHA-256 {release.sha256}</code></details>
+            </> : preview ? <>
+              <p id="preview-notice">Windows 预览版可以直接下载。安装包未签名，Windows 可能显示「未知发布者」。安装后注册仍需私发的邀请码。</p>
+              <a className="site-action primary-action" href={installer} aria-describedby="preview-notice"><ArrowDownToLine size={17}/> 下载预览版 .exe</a>
+              <p>{(preview.bytes / 1024 / 1024).toFixed(1)} MB</p>
+              <details id="release"><summary>安装包校验值</summary><code>SHA-256 {preview.sha256}</code></details>
             </> : <p className="download-status" id="release">正式 Windows 安装包待发布。</p>}
           </div>
         </div>

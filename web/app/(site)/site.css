@@ -142,3 +142,5 @@
 @media (prefers-reduced-motion: reduce) {
   .site-shark-intro { display: none; }
 }
+
+#preview-notice { max-width: 46ch; margin: 0 0 12px; }

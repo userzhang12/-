@@ -12,3 +12,13 @@ export function releaseManifest(value, channel) {
   }
   return value;
 }
+
+export function previewManifest(value) {
+  if (!value || value.channel !== 'preview' || !/^\d+\.\d+\.\d+$/.test(value.version) ||
+      value.file !== `jingxu-test-setup-${value.version}-x64.exe` ||
+      !/^[a-f0-9]{64}$/.test(value.sha256) ||
+      !Number.isSafeInteger(value.bytes) || value.bytes <= 0) {
+    throw new Error('预览版清单格式无效');
+  }
+  return value;
+}

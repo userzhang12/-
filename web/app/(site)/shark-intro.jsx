@@ -5,16 +5,20 @@ import { animate } from 'motion';
 import { createSharkJaw } from './shark-jaw';
 
 const swim = `
+float swimBend(float z, float time) {
+  float tail = smoothstep(0.15, 2.65, -z);
+  return tail * (0.035 + tail * 0.315) * sin(time * 12.0 + z * 1.75);
+}
 vec3 swimmingPosition(vec3 point, float time) {
-  float tail = smoothstep(0.15, 2.65, -point.z);
-  point.x += tail * tail * sin(time * 12.0 + point.z * 1.75) * 0.31;
+  point.x += swimBend(point.z, time);
   return point;
 }
 `;
 
-function applySharkSkin(three, shark, swimTime, assembly, bite, waterline) {
+function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, waterline) {
   const skin = new three.MeshPhysicalMaterial({
     vertexColors: true,
+    transparent: true,
     roughness: .35,
     clearcoat: .58,
     clearcoatRoughness: .29,
@@ -24,14 +28,20 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, waterline) {
     shader.uniforms.swimTime = swimTime;
     shader.uniforms.assembly = assembly;
     shader.uniforms.bite = bite;
-    shader.vertexShader = 'uniform float swimTime; varying float scanPosition; varying vec3 bitePosition;\n' + swim
-      + shader.vertexShader.replace('#include <begin_vertex>', `
+    shader.uniforms.submerge = submerge;
+    shader.vertexShader = 'uniform float swimTime; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth;\n' + swim
+      + shader.vertexShader.replace('#include <beginnormal_vertex>', `
+        #include <beginnormal_vertex>
+        float slope = (swimBend(position.z + .025, swimTime) - swimBend(position.z - .025, swimTime)) / .05;
+        objectNormal.z -= objectNormal.x * slope;
+      `).replace('#include <begin_vertex>', `
         #include <begin_vertex>
         transformed = swimmingPosition(transformed, swimTime);
         bitePosition = position;
+        waterDepth = max(0.0, -(modelMatrix * vec4(transformed, 1.0)).y - 0.12);
         scanPosition = clamp((2.7 - position.z) / 5.4, 0.0, 1.0);
       `);
-    shader.fragmentShader = 'uniform float assembly; uniform float bite; varying float scanPosition; varying vec3 bitePosition;\n'
+    shader.fragmentShader = 'uniform float swimTime; uniform float assembly; uniform float bite; uniform float submerge; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth;\n'
       + shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
         #include <clipping_planes_fragment>
         float mouthFront = smoothstep(1.35, 2.06, bitePosition.z);
@@ -43,6 +53,16 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, waterline) {
           float grain = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
           if (grain >= coverage) discard;
         }
+      `).replace('#include <opaque_fragment>', `
+        float haze = submerge * smoothstep(0.0, 3.7, waterDepth);
+        vec2 ray = bitePosition.xz + vec2(swimTime * .055, 0.0);
+        float bands = sin(ray.x * 21.0 + sin(ray.y * 12.0 + swimTime * .32))
+                    + sin(ray.y * 19.0 - ray.x * 7.0 + sin(ray.x * 5.0 + ray.y * 3.0) * 1.35 - swimTime * .24);
+        float caustic = pow(clamp(1.0 - abs(bands) * .83, 0.0, 1.0), 4.0);
+        outgoingLight = mix(outgoingLight, vec3(0.019, 0.16, 0.22), haze * .50);
+        outgoingLight += vec3(.029, .104, .117) * caustic * submerge * exp(-waterDepth * .16);
+        diffuseColor.a *= mix(1.0, 0.88 - haze * .20, submerge);
+        #include <opaque_fragment>
       `);
   };
   shark.traverse(object => {
@@ -169,7 +189,8 @@ function rebound(hero) {
 
 function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
-  const hero = canvas.parentElement;
+  const stage = canvas.parentElement;
+  const hero = canvas.closest('.site-hero');
   if (motion.matches || hero.getBoundingClientRect().bottom < innerHeight * .65) return;
   let renderer;
   try {
@@ -192,8 +213,9 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const swimTime = { value: 0 };
   const assembly = { value: 0 };
   const bite = { value: 0 };
+  const submerge = { value: 0 };
   const waterline = new three.Plane(new three.Vector3(0, 1, 0), .12);
-  applySharkSkin(three, shark, swimTime, assembly, bite, waterline);
+  applySharkSkin(three, shark, swimTime, assembly, bite, submerge, waterline);
   const surfaceLight = makeSurfaceLight(three, shark, MeshSurfaceSampler, swimTime, assembly);
   const setOpening = createSharkJaw(three, shark, waterline);
   scene.add(shark);
@@ -225,25 +247,36 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
     [2.10,-.63,-8.5], [1.05,-1.55,-12.0],
   ].map(point => new three.Vector3(...point)));
   const direction = new three.Vector3(0, 0, 1);
-  const start = performance.now();
+  let start = performance.now();
   const returnStart = 3.18;
   const returnDuration = 1.64;
-  const duration = 5.35;
+  const patrolStart = returnStart + returnDuration;
+  const patrolOrigin = returnPath.getPoint(1);
+  const returnHeading = new three.Quaternion().setFromUnitVectors(direction, returnPath.getTangent(1));
+  const swimTarget = new three.Vector3();
+  const swimDirection = new three.Vector3();
+  const swimHeading = new three.Quaternion();
   const wake = new three.Vector3();
   const wakeStart = new three.Vector3();
   let frame = 0;
   let stopped = false;
   let passed = false;
   let impact = 0;
+  let visible = false;
+  let pausedAt = start;
+  let lastPatrolFrame = -Infinity;
 
   function stop() {
     if (stopped) return;
     stopped = true;
     cancelAnimationFrame(frame);
     observer.disconnect();
+    viewport.disconnect();
+    document.removeEventListener('visibilitychange', updateVisibility);
     motion.removeEventListener('change', onMotion);
     canvas.removeEventListener('webglcontextlost', stop);
     delete canvas.dataset.playing;
+    delete canvas.dataset.patrol;
     scene.traverse(object => {
       object.geometry?.dispose();
       object.material?.dispose();
@@ -254,7 +287,7 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   function onMotion(event) { if (event.matches) stop(); }
 
   function resize() {
-    const { width, height } = hero.getBoundingClientRect();
+    const { width, height } = stage.getBoundingClientRect();
     if (!width || !height) return;
     camera.aspect = width / height;
     camera.fov = camera.aspect < 0.8 ? 69 : 42;
@@ -263,11 +296,62 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
     renderer.setSize(width, height, false);
   }
 
+  function updateVisibility() {
+    if (stopped) return;
+    if (!visible || document.hidden) {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      pausedAt ??= performance.now();
+      return;
+    }
+    if (pausedAt !== null) {
+      start += performance.now() - pausedAt;
+      pausedAt = null;
+    }
+    if (!frame) frame = requestAnimationFrame(animate);
+  }
+
+  function patrolPosition(time, target) {
+    const narrow = camera.aspect < .8;
+    const horizontal = narrow ? 2.6 : 5.4;
+    return target.set(
+      horizontal * (0.73 * Math.sin(0.37 * time - .55) + 0.20 * Math.sin(0.89 * time + 1.3)),
+      (narrow ? -7.35 : -3.35) + 0.62 * Math.sin(time * .64) + 0.28 * Math.sin(time * 1.11 + 1),
+      -7.5 + 1.8 * Math.sin(time * .24) + 0.82 * Math.sin(time * .77),
+    );
+  }
+
   function animate(now) {
     const time = Math.max(0, now - start) / 1000;
-    if (time >= duration || document.hidden || hero.getBoundingClientRect().bottom < innerHeight * 0.4) {
-      if (passed) hero.dataset.sharkPatrol = 'true';
-      stop();
+    if (time >= patrolStart) {
+      if (now - lastPatrolFrame >= 1000 / 24) {
+        lastPatrolFrame = now;
+        const age = time - patrolStart;
+        const depth = Number(hero.style.getPropertyValue('--ocean-depth'));
+        camera.lookAt(0, .5 - depth * (camera.aspect < .8 ? 5.1 : 3.1), 0);
+        const entry = three.MathUtils.smoothstep(age, 0, 2.1);
+        patrolPosition(age, swimTarget);
+        patrolPosition(age + .065, swimDirection).sub(swimTarget);
+        swimDirection.y *= .48;
+        swimDirection.normalize();
+        swimHeading.setFromUnitVectors(direction, swimDirection);
+        shark.position.copy(patrolOrigin).lerp(swimTarget, entry);
+        shark.quaternion.copy(returnHeading).slerp(swimHeading, entry);
+        shark.rotateZ((Math.sin(age * .85) * .13 + swimDirection.x * .12) * entry);
+        shark.visible = true;
+        waterline.constant = 12;
+        submerge.value = 1;
+        assembly.value = 1.2;
+        bite.value = 0;
+        setOpening(0);
+        if (surfaceLight) surfaceLight.visible = false;
+        canvas.dataset.playing = 'true';
+        swimTime.value = patrolStart + age * .66;
+        splash.visible = false;
+        canvas.dataset.patrol = 'true';
+        renderer.render(scene, camera);
+      }
+      frame = requestAnimationFrame(animate);
       return;
     }
     const progress = Math.pow(Math.min(time / 3.3, 1), 1.52);
@@ -296,7 +380,12 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
       shark.position.copy(returnPath.getPoint(fraction));
       shark.quaternion.setFromUnitVectors(direction, returnPath.getTangent(fraction));
       shark.rotateZ(.44 * Math.sin(Math.PI * fraction));
-      shark.visible = fraction < 1;
+      shark.visible = true;
+      submerge.value = three.MathUtils.smoothstep(fraction, .53, .9);
+      if (fraction >= .53) {
+        waterline.constant = 12;
+        canvas.dataset.patrol = 'true';
+      }
       setOpening(0);
       bite.value = 0;
     }
@@ -340,11 +429,16 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   }
 
   const observer = new ResizeObserver(resize);
-  observer.observe(hero);
+  observer.observe(stage);
+  const viewport = new IntersectionObserver(([entry]) => {
+    visible = entry.isIntersecting;
+    updateVisibility();
+  });
+  viewport.observe(stage);
+  document.addEventListener('visibilitychange', updateVisibility);
   resize();
   motion.addEventListener('change', onMotion);
   canvas.addEventListener('webglcontextlost', stop);
-  frame = requestAnimationFrame(animate);
   return stop;
 }
 
@@ -369,7 +463,7 @@ export default function SharkIntro() {
       const { scene } = await new GLTFLoader().loadAsync('/great-white-shark.glb');
       if (!cancelled) {
         stop = playIntro(three, scene, MeshSurfaceSampler, canvas.current, () => {
-          if (!motion.matches) stopRebound = rebound(canvas.current.parentElement);
+          if (!motion.matches) stopRebound = rebound(canvas.current.closest('.site-hero'));
         });
       }
       if (!stop) {
@@ -385,8 +479,6 @@ export default function SharkIntro() {
       motion.removeEventListener('change', onMotion);
       stopRebound?.();
       stop?.();
-      const hero = canvas.current?.parentElement;
-      if (hero) delete hero.dataset.sharkPatrol;
     };
   }, []);
 

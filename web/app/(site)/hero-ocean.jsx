@@ -18,7 +18,6 @@ uniform vec2 resolution;
 uniform vec2 pointer;
 uniform float time;
 uniform float immersion;
-uniform float patrolAge;
 
 uniform vec3 atmosphere;
 vec3 lightDirection;
@@ -97,49 +96,35 @@ vec3 ocean(vec3 ray) {
   return mix(color, sky(normalize(vec3(ray.x, 0.0, ray.z))) * 0.73, horizonFog);
 }
 
+float marineSnow(vec2 p, float density, float speed) {
+  vec2 cell = p * density + vec2(time * speed * 0.32, -time * speed);
+  float grain = hash(floor(cell));
+  vec2 particle = vec2(0.23 + grain * 0.53, 0.18 + hash(floor(cell) + 7.3) * 0.62);
+  float soft = 1.0 - smoothstep(0.018, 0.095, length(fract(cell) - particle));
+  return smoothstep(0.81, 0.98, grain) * soft;
+}
+
 vec3 belowSurface(vec2 uv) {
-  vec2 p = uv + pointer * 0.02;
-  float depth = 1.0 - p.y;
-  float spread = p.x - 0.58 - depth * 0.13;
-  float shafts = 0.48 + 0.34 * sin(spread * 31.0 + time * 0.38)
-                       + 0.18 * sin(spread * 65.0 - time * 0.24);
-  float light = max(0.0, shafts) * exp(-depth * 1.85 - abs(spread) * 2.6);
-  float ceiling = smoothstep(0.84, 1.0, p.y + 0.027 * sin(p.x * 22.0 + time));
-  return vec3(0.008, 0.049, 0.081) + vec3(0.065, 0.34, 0.40) * light
-                                  + vec3(0.025, 0.17, 0.20) * ceiling;
-}
-
-// Several independent time scales give the shark slow turns and uneven dives.
-vec2 patrolPosition(float t) {
-  return vec2(0.49 + 0.23 * sin(t * 0.24 + 2.38) + 0.086 * sin(t * 0.49 + 2.2),
-              0.36 + 0.047 * sin(t * 0.32 + 1.6) + 0.031 * sin(t * 0.17));
-}
-
-vec3 finAndWake(vec3 water, vec2 uv, float aspect, float age) {
-  vec2 center = patrolPosition(age);
-  vec2 velocity = patrolPosition(age + 0.1) - patrolPosition(age - 0.1);
-  float heading = velocity.x < 0.0 ? -1.0 : 1.0;
-  float distance = smoothstep(0.29, 0.44, center.y);
-  float dive = smoothstep(-0.35, 0.24, sin(age * 0.47 + sin(age * 0.19) + 1.7));
-  float appear = smoothstep(0.25, 1.6, age);
-  vec2 p = (uv - center) * vec2(aspect, 1.0);
-  float width = mix(0.025, 0.046, distance) * mix(0.54, 1.0, smoothstep(0.0, 0.011, abs(velocity.x)));
-  float finX = p.x * heading / width;
-  float leading = smoothstep(-0.52, 0.70, finX);
-  float trailing = 1.0 - smoothstep(-0.09, 0.73, finX);
-  float height = width * 0.68 * leading * trailing * dive;
-  float edge = 1.5 / resolution.y;
-  float fin = smoothstep(-edge, edge * 0.65, p.y + 0.0007)
-             * (1.0 - smoothstep(height - edge, height + edge, p.y))
-             * smoothstep(0.0015, 0.004, height) * appear;
-  vec3 finColor = mix(vec3(0.021, 0.06, 0.084), vec3(0.085, 0.19, 0.23), atmosphere.x);
-  finColor += smoothstep(0.64, 1.0, p.y / max(height, 0.001)) * lightTint * 0.054;
-  float behind = -p.x * heading;
-  float wakeWidth = 0.003 + max(0.0, behind) * 0.14;
-  float wake = exp(-abs(abs(p.y) - wakeWidth) * 410.0)
-             * smoothstep(0.0, 0.012, behind) * (1.0 - smoothstep(0.044, 0.13, behind));
-  wake *= (0.5 + 0.5 * sin(behind * 182.0 - time * 4.8)) * appear * mix(0.22, 0.8, dive);
-  return mix(water + lightTint * wake * 0.15, finColor, fin * 0.92);
+  float aspect = resolution.x / resolution.y;
+  vec2 p = uv + pointer * 0.021;
+  float distance = 1.0 - p.y;
+  float source = p.x - 0.62 + (p.x - 0.62) * distance * 0.68;
+  float cloud = noise(vec2(source * 31.0 + time * .055, 1.9));
+  float shafts = pow(max(0.0, 0.54 + 0.24 * sin(source * 29.0 + time * 0.33)
+                        + 0.19 * sin(source * 57.0 - time * 0.28)), 1.8);
+  float transmitted = exp(-distance * 2.25 - abs(source) * 2.1) * (shafts + cloud * .25);
+  float brokenLight = sin(p.x * 41.0 + sin(p.x * 23.0 + time) * 1.4 + time * 0.8)
+                    + sin(p.x * 26.0 - p.y * 43.0 - time * .71);
+  float caustics = pow(clamp(1.0 - abs(brokenLight) * .91, 0.0, 1.0), 3.0);
+  float ceiling = smoothstep(.81, 1.025, p.y + .029 * sin(p.x * 21.0 + time * .84));
+  vec2 volume = vec2(p.x * aspect, p.y);
+  float particles = marineSnow(volume, 25.0, .24) * .40 + marineSnow(volume + 0.39, 42.0, .63);
+  float available = 0.32 + atmosphere.x * 0.68 + atmosphere.y * .15;
+  vec3 color = mix(vec3(.008, .043, .071), vec3(.019, .145, .185), pow(clamp(p.y, 0.0, 1.0), 1.8));
+  color += available * vec3(.085, .55, .61) * transmitted;
+  color += available * vec3(.14, .56, .55) * ceiling * (.24 + caustics * .47);
+  color += vec3(.26, .53, .56) * particles * (.13 + transmitted * .6);
+  return color;
 }
 
 void main() {
@@ -152,6 +137,10 @@ void main() {
   lightDirection = normalize(vec3(min(0.71, aspect * 0.40), atmosphere.z, 1.0));
   lightTint = mix(vec3(0.43, 0.68, 1.0), vec3(1.0, 0.91, 0.70), atmosphere.x);
   lightTint = mix(lightTint, vec3(1.0, 0.57, 0.29), atmosphere.y);
+  if (immersion >= 0.999) {
+    gl_FragColor = vec4(belowSurface(uv), 1.0);
+    return;
+  }
   vec3 color = sky(ray);
   if (ray.y < 0.0) {
     color = mix(color * 0.73, ocean(ray), smoothstep(0.0, 0.018, -ray.y));
@@ -166,7 +155,6 @@ void main() {
     color += step(0.984, starSeed) * star * twinkle * night
            * smoothstep(0.04, 0.20, ray.y) * (1.0 - veil * 0.72) * vec3(0.59, 0.73, 0.96);
   }
-  if (patrolAge >= 0.0 && ray.y < 0.0) color = finAndWake(color, uv, aspect, patrolAge);
   if (immersion > 0.0) color = mix(color, belowSurface(uv), immersion);
   float vignette = 1.0 - 0.27 * dot(uv - 0.5, uv - 0.5);
   color = color * vignette + (hash(gl_FragCoord.xy) - 0.5) * 0.009;
@@ -208,7 +196,7 @@ export default function HeroOcean() {
 
   useEffect(() => {
     const canvas = surface.current;
-    const hero = canvas.parentElement;
+    const hero = canvas.closest('.site-hero');
     function syncClock() {
       light = localLighting();
       hero.style.setProperty('--ocean-night', (1 - light[0]) * (1 - light[1]));
@@ -258,7 +246,6 @@ export default function HeroOcean() {
     const time = gl.getUniformLocation(program, 'time');
     const immersion = gl.getUniformLocation(program, 'immersion');
     const atmosphere = gl.getUniformLocation(program, 'atmosphere');
-    const patrolAge = gl.getUniformLocation(program, 'patrolAge');
 
     let visible = false;
     let frame = 0;
@@ -269,7 +256,6 @@ export default function HeroOcean() {
     let y = 0;
     let depth = 0;
     let elapsed = 0;
-    let patrolStarted = null;
 
     function draw(now) {
       frame = 0;
@@ -282,11 +268,11 @@ export default function HeroOcean() {
         gl.uniform1f(time, elapsed);
         gl.uniform1f(immersion, depth);
         gl.uniform3f(atmosphere, ...light);
-        if (hero.dataset.sharkPatrol) patrolStarted ??= elapsed;
-        else patrolStarted = null;
-        gl.uniform1f(patrolAge, patrolStarted === null ? -1 : elapsed - patrolStarted);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
-        canvas.dataset.ready = 'true';
+        if (!canvas.dataset.ready) {
+          canvas.dataset.ready = 'true';
+          hero.dataset.oceanReady = 'true';
+        }
       }
       frame = requestAnimationFrame(draw);
     }
@@ -299,7 +285,11 @@ export default function HeroOcean() {
         frame = 0;
       }
       if (active && !frame) frame = requestAnimationFrame(draw);
-      if (reducedMotion.matches || gl.isContextLost()) delete canvas.dataset.ready;
+      if (reducedMotion.matches || gl.isContextLost()) {
+        delete canvas.dataset.ready;
+        delete hero.dataset.oceanReady;
+        hero.style.removeProperty('--ocean-depth');
+      }
     }
 
     function resize() {
@@ -322,8 +312,10 @@ export default function HeroOcean() {
 
     function scroll() {
       const bounds = hero.getBoundingClientRect();
-      const progress = Math.max(0, Math.min(1, (-bounds.top / bounds.height - 0.12) / 0.54));
+      const screen = Math.max(1, canvas.clientHeight);
+      const progress = Math.max(0, Math.min(1, (-bounds.top / screen - .10) / .52));
       depth = progress * progress * (3 - 2 * progress);
+      if (!reducedMotion.matches && !gl.isContextLost()) hero.style.setProperty('--ocean-depth', depth);
     }
 
     resize();
@@ -344,6 +336,8 @@ export default function HeroOcean() {
 
     return () => {
       stopClock();
+      delete hero.dataset.oceanReady;
+      hero.style.removeProperty('--ocean-depth');
       cancelAnimationFrame(frame);
       size.disconnect();
       intersection.disconnect();

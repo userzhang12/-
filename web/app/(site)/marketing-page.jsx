@@ -58,8 +58,14 @@ export default async function Download() {
 
     <main id="top">
       <section className="site-hero" aria-labelledby="site-title">
-        <HeroOcean/>
-        <SharkIntro/>
+        <div className="site-hero-visual" aria-hidden="true">
+          <div className="site-hero-stage">
+            <HeroOcean/>
+          </div>
+        </div>
+        <div className="site-shark-visual" aria-hidden="true">
+          <div className="site-shark-stage"><SharkIntro/></div>
+        </div>
         <div className="site-container site-hero-inner">
           <div className="site-hero-copy">
             <p className="site-kicker">镜序 · AI 商品短剧制作软件</p>

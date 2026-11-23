@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, FileText, Monitor, ScanLine } from 'lucide-react';
+import ProductPreview from './product-preview';
 import { releaseManifest } from './manifest.mjs';
 
 export const metadata = {
@@ -50,26 +51,24 @@ export default async function Download() {
     <header className="site-header"><div className="site-container site-nav">
       <a href="#top" className="site-brand"><span><ScanLine size={22}/></span>镜序</a>
       <nav aria-label="官网导航"><a href="#product">产品介绍</a><a href="#questions">常见问题</a></nav>
-      <a className="site-action nav-action" href="#windows"><ArrowDownToLine size={16}/> 客户端下载</a>
+      <a className="site-action nav-action" href="#windows"><ArrowDownToLine size={16}/> {installer ? '客户端下载' : '发布状态'}</a>
     </div></header>
 
     <main id="top">
       <section className="site-hero" aria-labelledby="site-title">
-        <figure className="site-hero-image">
-          <img src="/workspace-hero.webp" alt="" fetchPriority="high"/>
-          <figcaption><Clapperboard size={15}/> 镜序短剧示例 · 反转厨房</figcaption>
-        </figure>
         <div className="site-container site-hero-inner">
           <div className="site-hero-copy">
-            <p className="site-kicker">AI 商品短剧制作软件</p>
-            <h1 id="site-title">把商品拍成<br/><em>值得看完的故事。</em></h1>
-            <p className="site-summary">为商家与内容团队打造。从商品资料出发，制作有剧情、带配音的竖屏短剧。</p>
+            <p className="site-kicker">镜序 · AI 商品短剧制作软件</p>
+            <h1 id="site-title">从商品资料到<br/><em>带配音的竖屏短剧</em></h1>
+            <p className="site-summary">生成剧本，逐镜调整台词和画面，合成带字幕的 9:16 成片。</p>
             <div className="site-hero-actions">
               {installer ? <a className="site-action primary-action" href={installer}><ArrowDownToLine size={18}/> 下载 Windows 版</a> :
-                <a className="site-action primary-action" href="#windows"><ArrowDown size={17}/> 查看下载</a>}
+                <a className="site-action primary-action" href="#windows"><ArrowDown size={17}/> Windows 版待发布</a>}
+              <a className="site-action secondary-action" href="#product">了解制作流程</a>
             </div>
-            <p className="site-system">{system}{!release && ' · 安装包待发布'}</p>
+            <p className="site-system">{system}</p>
           </div>
+          <ProductPreview/>
         </div>
       </section>
 

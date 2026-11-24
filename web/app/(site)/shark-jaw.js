@@ -14,13 +14,13 @@ export function createSharkJaw(three, shark, waterline) {
     side: three.DoubleSide, clippingPlanes: [waterline],
   });
   const gum = new three.MeshPhysicalMaterial({
-    color: '#453138', roughness: .47, clearcoat: .20, clearcoatRoughness: .38,
+    color: '#3a3037', roughness: .54, clearcoat: .20, clearcoatRoughness: .38,
     side: three.DoubleSide, clippingPlanes: [waterline],
   });
   const shade = material('#20141b', .85);
   shade.emissive.set('#2e1820');
   shade.emissiveIntensity = .22;
-  const skin = material('#879595', .38);
+  const skin = material('#82908e', .42);
   const upperArch = new three.CatmullRomCurve3([
     [-.49, .008, 1.43], [-.43, -.027, 1.78], [-.25, .027, 2.17],
     [0, .074, 2.29], [.25, .027, 2.17], [.43, -.027, 1.78], [.49, .008, 1.43],
@@ -28,15 +28,15 @@ export function createSharkJaw(three, shark, waterline) {
   const lowerArch = new three.CatmullRomCurve3(upperArch.points.map(point =>
     new three.Vector3(point.x * .95, point.y - .06, point.z - .085).sub(lower.position),
   ));
-  mouth.add(new three.Mesh(new three.TubeGeometry(upperArch, 40, .044, 8, false), gum));
-  lower.add(new three.Mesh(new three.TubeGeometry(lowerArch, 40, .066, 9, false), skin));
+  mouth.add(new three.Mesh(new three.TubeGeometry(upperArch, 40, .030, 8, false), gum));
+  lower.add(new three.Mesh(new three.TubeGeometry(lowerArch, 40, .038, 9, false), skin));
   const innerLip = lowerArch.clone();
   innerLip.points.forEach(point => { point.x *= .95; point.y += .024; point.z -= .025; });
-  lower.add(new three.Mesh(new three.TubeGeometry(innerLip, 40, .028, 8, false), gum));
+  lower.add(new three.Mesh(new three.TubeGeometry(innerLip, 40, .020, 8, false), gum));
 
   const jawSkin = new three.SphereGeometry(1, 36, 14);
-  jawSkin.scale(.45, .132, .54);
-  jawSkin.translate(0, -.16, .47);
+  jawSkin.scale(.415, .092, .56);
+  jawSkin.translate(0, -.128, .47);
   lower.add(new three.Mesh(jawSkin, skin));
 
   // A dark recessed surface connects the palate to the moving lower jaw.
@@ -88,6 +88,22 @@ export function createSharkJaw(three, shark, waterline) {
       row.setMatrixAt(index, toothTransform.matrix);
       toothTint.setRGB(.84 + .12 * Math.sin(t * Math.PI), .87 + .09 * Math.sin(t * Math.PI), .91);
       row.setColorAt(index, toothTint);
+    }
+    parent.add(row);
+  }
+
+  // The inner rows sit just behind the working teeth and remain visible in the open bite.
+  for (const [parent, arch, bottom] of [[mouth, upperArch, false], [lower, innerLip, true]]) {
+    const row = new three.InstancedMesh(tooth, enamel, 13);
+    for (let index = 0; index < 13; index++) {
+      const t = (index + .5) / 13;
+      const point = arch.getPointAt(t);
+      const tangent = arch.getTangentAt(t);
+      toothTransform.position.set(point.x * .83, point.y + (bottom ? .006 : -.004), point.z - .075);
+      toothTransform.rotation.set(0, Math.atan2(-tangent.z, tangent.x), bottom ? Math.PI : 0);
+      toothTransform.scale.setScalar(.54 + .14 * Math.sin(t * Math.PI));
+      toothTransform.updateMatrix();
+      row.setMatrixAt(index, toothTransform.matrix);
     }
     parent.add(row);
   }

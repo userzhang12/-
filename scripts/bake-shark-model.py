@@ -1,4 +1,4 @@
-"""Add the jaw morph and swim rig to the CC0 great-white-shark GLB (see NOTICE)."""
+"""Add the jaw morph and swimming rig to the Jingxu shark GLB."""
 import json
 import math
 from pathlib import Path
@@ -35,7 +35,7 @@ def vertex_normals(points, triangles):
 
 def add_swim_rig(model, mesh_node, primitive, points, append_view):
     spine = [('SwimRoot', .55), ('SwimBody', -.38), ('SwimBack', -1.14),
-             ('SwimPeduncle', -1.93), ('SwimTail', -2.42)]
+             ('SwimPeduncle', -1.93), ('SwimTail', -2.86)]
     nodes = model['nodes']
     root = len(nodes)
     joints = list(range(root, root + len(spine)))

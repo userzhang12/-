@@ -7,7 +7,7 @@ import { localLighting } from './ocean-lighting';
 
 const swim = `
 float swimBend(float z, float time) {
-  float tail = smoothstep(0.15, 2.65, -z);
+  float tail = smoothstep(0.15, 3.05, -z);
   return tail * (0.035 + tail * 0.315) * sin(time * 12.0 + z * 1.75);
 }
 vec3 swimmingPosition(vec3 point, float time) {
@@ -28,10 +28,9 @@ float grainField(vec3 point) {
 function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBlend, waterline) {
   const skin = new three.MeshPhysicalMaterial({
     vertexColors: true,
-    transparent: true,
-    roughness: .35,
-    clearcoat: .58,
-    clearcoatRoughness: .29,
+    roughness: .47,
+    clearcoat: .30,
+    clearcoatRoughness: .42,
     clippingPlanes: [waterline],
   });
   skin.onBeforeCompile = shader => {
@@ -50,7 +49,7 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBle
         transformed = mix(swimmingPosition(transformed, swimTime), transformed, rigBlend);
         bitePosition = position;
         waterDepth = max(0.0, -(modelMatrix * vec4(transformed, 1.0)).y - 0.12);
-        scanPosition = clamp((2.7 - position.z) / 5.4, 0.0, 1.0);
+        scanPosition = clamp((2.55 - position.z) / 5.65, 0.0, 1.0);
       `).replace('#include <morphtarget_vertex>', `
         #include <morphtarget_vertex>
         jawDrop = max(0.0, position.y - transformed.y);
@@ -92,8 +91,7 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBle
                     + sin(ray.y * 19.0 - ray.x * 7.0 + sin(ray.x * 5.0 + ray.y * 3.0) * 1.35 - swimTime * .24);
         float caustic = pow(clamp(1.0 - abs(bands) * .83, 0.0, 1.0), 4.0);
         outgoingLight = mix(outgoingLight, vec3(0.019, 0.16, 0.22), haze * .50);
-        outgoingLight += vec3(.029, .104, .117) * caustic * submerge * exp(-waterDepth * .16);
-        diffuseColor.a *= mix(1.0, 0.88 - haze * .20, submerge);
+        outgoingLight += vec3(.013, .049, .057) * caustic * submerge * exp(-waterDepth * .16);
         #include <opaque_fragment>
       `);
   };
@@ -150,7 +148,7 @@ function makeSurfaceLight(three, shark, MeshSurfaceSampler, swimTime, assembly) 
       varying float opacity;
       varying vec3 tint;
       void main() {
-        float scan = clamp((2.7 - position.z) / 5.4, 0.0, 1.0);
+        float scan = clamp((2.55 - position.z) / 5.65, 0.0, 1.0);
         float arrival = 0.14 + scan * 0.66 + seed * 0.10;
         float gathered = smoothstep(arrival - 0.32, arrival + 0.07, assembly);
         float orbit = seed * 6.283 + swimTime * (1.8 + seed);

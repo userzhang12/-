@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, FileText, Monitor, ScanLine } from 'lucide-react';
+import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, Clock3, FileText, Film, Images, Monitor, ScanLine } from 'lucide-react';
 import HeroOcean from './hero-ocean';
 import SharkIntro from './shark-intro';
 import ProductPreview from './product-preview';
@@ -52,8 +52,19 @@ async function currentPreview() {
 
 const questions = [
   ['镜序支持哪些系统？', '首发客户端面向 Windows 10 和 Windows 11 的 x64 电脑。'],
-  ['安装后需要注册账号吗？', '需要。镜序目前采用邀请制，用邮箱和邀请码注册后可以加入工作空间。'],
+  ['安装后需要注册账号吗？', '需要。预览版可以直接下载安装，首次注册时需填写邮箱、密码和单次邀请码。已有镜序账号可以直接登录。'],
+  ['邀请预览和正式供应商模式有什么区别？', '邀请预览使用服务器本地制作流程和测试点数。剧本使用模板，画面根据参考素材合成。实际可用的模型以当前工作空间为准。'],
+  ['安装包显示未知发布者怎么办？', '当前未签名的预览包可能触发 Windows 提示。请确认来自镜序官网，并查对下载区的 SHA-256。'],
+  ['已安装的客户端需要重新下载吗？', '工作台由服务器提供，关闭并重开现有客户端即可加载网页改动。更换预览版 EXE 时，需要从官网下载并安装对应版本。'],
+  ['忘记密码怎么办？', '登录页启用邮件找回时，可以通过注册邮箱收取一次性重置码。未开通邮件找回的工作空间请联系邀请人或部署管理员。'],
   ['成片可以导出成什么格式？', '可以导出适合短视频平台的 9:16 竖屏 MP4，包含配音和字幕。'],
+];
+
+const workflow = [
+  { icon: FileText, title: '录入商品资料', copy: '逐条确认商品规格、卖点和宣传依据，再提交生成。' },
+  { icon: Images, title: '管理参考素材', copy: '上传商品、角色和场景图片，为镜头绑定相应素材。' },
+  { icon: Clapperboard, title: '编辑分镜与台词', copy: '逐镜调整画面、提示词和对白，试听普通话配音。' },
+  { icon: Film, title: '审核并导出', copy: '检查首帧和片段后，合成 1080 × 1920 的竖屏 MP4。' },
 ];
 
 export default async function Download() {
@@ -62,12 +73,14 @@ export default async function Download() {
   const preview = root && !release ? await currentPreview() : null;
   const installer = release ? new URL('stable/' + release.file, root).href
     : preview ? new URL('preview/' + preview.file, root).href : null;
-  const system = 'Windows 10 / 11 · x64' + (release || preview ? ' · v' + (release || preview).version : '');
+  const version = release || preview;
+  const system = 'Windows 10 / 11 · x64';
+  const versionLabel = version ? (preview ? '邀请预览版 ' : 'Windows 版 ') + version.version : '';
 
   return <div className="download-site">
     <header className="site-header"><div className="site-container site-nav">
       <a href="#top" className="site-brand"><span><ScanLine size={22}/></span>镜序</a>
-      <nav aria-label="官网导航"><a href="#product">产品介绍</a><a href="#questions">常见问题</a></nav>
+      <nav aria-label="官网导航"><a href="#product">产品介绍</a><a href="#workflow">制作流程</a><a href="#questions">常见问题</a></nav>
       <a className="site-action nav-action" href="#windows"><ArrowDownToLine size={16}/> {installer ? '客户端下载' : '发布状态'}</a>
     </div></header>
 
@@ -89,9 +102,9 @@ export default async function Download() {
             <div className="site-hero-actions">
               {installer ? <a className="site-action primary-action" href={preview ? "#windows" : installer}><ArrowDownToLine size={18}/> {preview ? "获取 Windows 预览版" : "下载 Windows 版"}</a> :
                 <a className="site-action primary-action" href="#windows"><ArrowDown size={17}/> Windows 版待发布</a>}
-              <a className="site-action secondary-action" href="#product">了解制作流程</a>
+              <a className="site-action secondary-action" href="#workflow">了解制作流程</a>
             </div>
-            <p className="site-system">{system}</p>
+            <p className="site-system">{system}{versionLabel && ' · ' + versionLabel}</p>
           </div>
           <div className="site-hero-preview"><ProductPreview/></div>
         </div>
@@ -109,19 +122,49 @@ export default async function Download() {
         </div>
       </section>
 
-      <section className="site-container" id="windows" aria-labelledby="download-title">
+      <section className="site-workflow-wrap" id="workflow" aria-labelledby="workflow-title">
+        <div className="site-container site-workflow">
+          <h2 id="workflow-title">从一份商品资料开始制作</h2>
+          <ol className="site-workflow-grid">
+            {workflow.map(({ icon: Icon, title, copy }) => <li key={title}>
+              <Icon size={23} aria-hidden="true"/><h3>{title}</h3><p>{copy}</p>
+            </li>)}
+          </ol>
+          <div className="site-workflow-aside"><Clock3 size={20} aria-hidden="true"/>
+            <div><h3>离开页面也能找回任务</h3><p>在任务中心查看生成进度，打开最近项目继续编辑。预览账号用测试点数查看用量。</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="site-container site-install" id="windows" aria-labelledby="download-title">
         <div className="site-download">
-          <div><h2 id="download-title">下载镜序</h2><p>{system}</p></div>
-          <div className="site-download-info">
-            {release ? <><a className="site-action primary-action" href={installer}><ArrowDownToLine size={17}/> 下载 .exe 安装包</a>
-              <p>发布于 {release.published} · {(release.bytes / 1024 / 1024).toFixed(1)} MB</p>
-              <details id="release"><summary>版本说明和安装包校验值</summary><p className="release-notes">{release.notes}</p><code>SHA-256 {release.sha256}</code></details>
-            </> : preview ? <>
-              <p id="preview-notice">Windows 预览版可以直接下载。安装包未签名，Windows 可能显示「未知发布者」。安装后注册仍需私发的邀请码。</p>
-              <a className="site-action primary-action" href={installer} aria-describedby="preview-notice"><ArrowDownToLine size={17}/> 下载预览版 .exe</a>
-              <p>{(preview.bytes / 1024 / 1024).toFixed(1)} MB</p>
-              <details id="release"><summary>安装包校验值</summary><code>SHA-256 {preview.sha256}</code></details>
-            </> : <p className="download-status" id="release">正式 Windows 安装包待发布。</p>}
+          <div className="site-download-main">
+            <h2 id="download-title">下载镜序</h2>
+            <p>{system}</p>
+            {version && <dl className="site-release-details">
+              <div><dt>版本</dt><dd>{version.version}{preview ? ' 邀请预览' : ''}</dd></div>
+              <div><dt>大小</dt><dd>{(version.bytes / 1024 / 1024).toFixed(1)} MiB</dd></div>
+              {release && <div><dt>发布于</dt><dd>{release.published}</dd></div>}
+            </dl>}
+            {installer ? <>
+              <a className="site-action primary-action" href={installer} aria-describedby={preview ? 'preview-notice' : undefined}>
+                <ArrowDownToLine size={18}/> {preview ? '下载预览版 .exe' : '下载 Windows .exe'}
+              </a>
+              {preview && <p id="preview-notice">此预览包未签名，Windows 可能显示「未知发布者」。注册需要单独发放的邀请码。</p>}
+              <details id="release"><summary>{release ? '版本说明和 SHA-256' : '查看 SHA-256 校验值'}</summary>
+                {release && <p className="release-notes">{release.notes}</p>}
+                <code>{version.sha256}</code>
+              </details>
+            </> : <p className="download-status" id="release">当前没有可下载的 Windows 安装包。</p>}
+          </div>
+          <div className="site-install-guide">
+            <h3>安装后如何开始</h3>
+            <ol>
+              <li>下载安装包，在 Windows 上运行 .exe。</li>
+              <li>打开镜序。已有账号可直接登录，新账号使用邀请码注册。</li>
+              <li>新建第一个项目，录入并确认商品资料。</li>
+            </ol>
+            <a href="#questions">查看安装与账号问题</a>
           </div>
         </div>
       </section>

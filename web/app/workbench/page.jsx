@@ -31,12 +31,14 @@ const steps = [
   { label: '剧本分镜', icon: ListVideo, key: 'script' }, { label: '生成渲染', icon: Video, key: 'render' },
   { label: '成片导出', icon: ArrowDownToLine, key: 'export' },
 ];
-const pageTitle = { product: '商品录入', assets: '资产管理', script: '分镜工作台', render: '生成渲染', export: '成片导出', projects: '项目总览', trends: '热梗素材库', usage: '费用与用量', operations: '平台运营', settings: '工作空间设置', metrics: '投放数据', help: '使用说明' };
+const pageTitle = { product: '商品录入', assets: '资产管理', script: '分镜工作台', render: '生成渲染', export: '成片导出', projects: '项目总览', trends: '热梗素材库', usage: '费用与用量', operations: '平台运营', settings: '工作空间设置', metrics: '投放数据', help: '帮助与客服', tasks: '任务中心', dataRequests: '数据管理申请' };
 const projectPages = new Set([...steps.map(step => step.key), 'metrics']);
 const homeRoute = { page: 'projects', projectId: null, shot: '01', filter: 'all' };
 const kindNames = { script: '剧本生成', frame: '首帧生成', clip: '片段渲染', portrait: '角色定妆', export: '成片合成' };
 const stateNames = { queued: '排队中', running: '处理中', done: '已完成', failed: '失败', uncertain: '待核对' };
 const sourceNames = { deepseek: 'DeepSeek API', ark_image: '火山方舟 · 生图', ark_video: '火山方舟 · 生视频', ark_reference: '火山方舟 · 尾帧导入', cloud_image: 'Cloudflare Workers AI · 免费额度', local: '本机处理', demo: '演示' };
+const dataRequestKinds = { 'account-export': '获取账号数据', 'account-delete': '删除账号', 'project-export': '获取项目数据', 'project-delete': '删除项目数据' };
+const dataRequestStates = { pending: '待处理', completed: '已处理', declined: '未获批准' };
 const roleNames = { owner: '空间主账号', admin: '空间管理员', member: '创作成员' };
 const displayUsage = (value, isPreview) => isPreview ? (value || 0) + ' 点' : yuan(value);
 const yuan = value => '¥' + ((value || 0) / 100).toFixed(2);
@@ -111,6 +113,11 @@ export default function Workbench() {
   const workspacePicker = useRef(null);
   const [workspaceMenu, setWorkspaceMenu] = useState(false);
   const [snapshot, setProject] = useState(null);
+  const [dataRequests, setDataRequests] = useState(null);
+  const [dataRequestsError, setDataRequestsError] = useState('');
+  const [tasks, setTasks] = useState(null);
+  const [tasksError, setTasksError] = useState('');
+  const [recentProject, setRecentProject] = useState(null);
   const [projects, setProjects] = useState(null);
   const [projectError, setProjectError] = useState(null);
   const [projectsError, setProjectsError] = useState('');
@@ -118,6 +125,7 @@ export default function Workbench() {
   const [operations, setOperations] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [session, setSession] = useState(null);
+  const [recoveryEnabled, setRecoveryEnabled] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState('');
   const [requiresLogin, setRequiresLogin] = useState(false);
@@ -145,6 +153,7 @@ export default function Workbench() {
     if (next.workspaceId !== previous.workspaceId) {
       lastProjectId.current = null;
       setProject(null); setProjects(null); setWorkspace(null); setTrends([]); setOperations([]);
+      setTasks(null); setTasksError(''); setRecentProject(null); setDataRequests(null); setDataRequestsError('');
       setInvite(''); setVoicePreview(null); setToast(''); setProjectsError(''); setProjectError(null); setAuthError('');
       setSession(null); setAuthLoading(true); setModal('');
     }
@@ -186,6 +195,14 @@ export default function Workbench() {
     }).finally(() => { if (fresh()) setAuthLoading(false); });
     return () => controller.abort();
   }, [workspaceId]);
+  useEffect(() => {
+    if (modal !== 'login') return;
+    const controller = new AbortController();
+    requestJson('/account/recovery', { signal: controller.signal })
+      .then(({ enabled }) => { if (!controller.signal.aborted) setRecoveryEnabled(enabled); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [modal]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 4600);
@@ -245,12 +262,70 @@ export default function Workbench() {
     if ((page === 'usage' || page === 'settings') && session.admin) request('/workspace', setWorkspace);
     if (page === 'operations' && session.operator) request('/operations', setOperations);
     else if (page === 'operations') navigate(homeRoute, 'replace');
-    if (page === 'projects') {
+    if (page === 'projects' || (page === 'dataRequests' && session.admin)) {
       setProjectsError('');
       request('/projects', setProjects, error => setProjectsError(error.message));
     }
+    if (page === 'dataRequests' && session.email !== 'demo') {
+      setDataRequestsError('');
+      request('/account/data-requests', setDataRequests, error => setDataRequestsError(error.message));
+    }
     return () => controller.abort();
   }, [page, session, workspaceId]);
+
+  useEffect(() => {
+    if (!session || page !== 'tasks') return;
+    const controller = new AbortController();
+    let pending = false;
+    let running = true;
+    setTasks(null);
+    setTasksError('');
+    async function refresh() {
+      if (!running || pending) return;
+      pending = true;
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
+        const records = await api('/tasks', { signal });
+        if (!controller.signal.aborted) { setTasks(records); setTasksError(''); }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error.status === 401) {
+          running = false;
+          setTasks(null);
+          setSession(null);
+          setRequiresLogin(true);
+          open('login');
+          return;
+        }
+        setTasksError(error.message);
+      } finally {
+        pending = false;
+      }
+    }
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    window.addEventListener('online', refresh);
+    return () => {
+      running = false;
+      controller.abort();
+      clearInterval(timer);
+      window.removeEventListener('online', refresh);
+    };
+  }, [session, page, workspaceId]);
+
+  useEffect(() => {
+    if (!session || session.email === 'demo') { setRecentProject(null); return; }
+    const key = 'jingxu.recent.' + session.workspace + '.' + session.email;
+    try {
+      if (projectPages.has(page) && project?.id === projectId && project && !isSample) {
+        const recent = { id: project.id, page, shot: active };
+        localStorage.setItem(key, JSON.stringify(recent));
+        setRecentProject(recent);
+      } else {
+        setRecentProject(JSON.parse(localStorage.getItem(key) || 'null'));
+      }
+    } catch { setRecentProject(null); }
+  }, [session, page, active, projectId, project?.id]);
 
   function switchWorkspace(id) {
     if (id === session?.workspace) { setWorkspaceMenu(false); workspaceToggle.current?.focus(); return; }
@@ -332,10 +407,17 @@ export default function Workbench() {
   }
 
   const projectPanel = projectPages.has(page);
-  const sidebarPage = projectPanel && page !== 'assets' ? 'script' : page;
+  const sidebarPage = projectPanel ? 'projects' : page;
   const pageError = authError || (!project && projectId && projectError?.id === projectId ? projectError.message : '');
   const pageLoading = authLoading || (Boolean(projectId) && !project && !pageError && !requiresLogin);
   const shots = project?.script?.beats || [];
+  const pendingFacts = project?.facts?.filter(fact => !fact.confirmed) || [];
+  const canGenerateScript = isSample || Boolean(project?.facts?.some(fact => fact.confirmed));
+
+  function reviewProductFacts() {
+    if (page !== 'product') go('product');
+    requestAnimationFrame(() => document.getElementById('confirm-fact-' + pendingFacts[0]?.id)?.focus());
+  }
   const fullDynamic = project?.render_settings?.full_dynamic === true;
   const renderedClip = shot => shot.approved && shot.clip && (!fullDynamic || shot.clip_dynamic);
   const readyCount = shots.filter(renderedClip).length;
@@ -353,15 +435,16 @@ export default function Workbench() {
     return Number.isInteger(rate) ? rate * (shot.end - shot.start) + modelOptions.local_clip_cents : 0;
   }
   const exporting = project?.jobs.some(job => job.kind === 'export' && ['queued', 'running'].includes(job.state));
-  const navigation = [{ key: 'projects', icon: LayoutGrid }, { key: 'script', icon: Clapperboard }, { key: 'assets', icon: Layers3 }, { key: 'trends', icon: TrendingUp }];
+  const navigation = [{ key: 'projects', icon: LayoutGrid }, { key: 'tasks', icon: Clock3 }, { key: 'trends', icon: TrendingUp }];
   const management = [{ key: 'usage', icon: Coins }, { key: 'settings', icon: Settings2 }, ...(session?.operator ? [{ key: 'operations', icon: LayoutGrid }] : [])];
   const visualPlan = project?.script?.visual;
-  const modalNames = { create: '新建项目', createWorkspace: '新建工作空间', joinWorkspace: '加入工作空间', direction: '创作要求', fact: '添加商品资料', source: '导入商品链接', upload: '上传素材', portrait: '生成角色定妆', portraitImport: '导入方舟尾帧', edit: '编辑分镜', refine: '定向修订分镜', trend: '添加热梗', trendSource: '导入热点来源', csv: '导入投放数据', settle: '结算任务费用', quota: '调整工作空间额度', login: '登录镜序', register: '邀请码注册', preview: '镜头预览' };
+  const modalNames = { create: '新建项目', createWorkspace: '新建工作空间', joinWorkspace: '加入工作空间', direction: '创作要求', fact: '添加商品资料', source: '导入商品链接', upload: '上传素材', portrait: '生成角色定妆', portraitImport: '导入方舟尾帧', edit: '编辑分镜', refine: '定向修订分镜', trend: '添加热梗', trendSource: '导入热点来源', csv: '导入投放数据', settle: '结算任务费用', quota: '调整工作空间额度', login: '登录镜序', recoveryRequest: '找回密码', recoveryReset: '输入重置码', password: '修改密码', dataRequest: '提交数据申请', register: '邀请码注册', preview: '镜头预览' };
   function field(key, label, placeholder, textarea = false, type = 'text') {
     const id = 'field-' + key;
     const error = fieldErrors[key];
     const props = {
       id, name: key, placeholder, value: form[key] ?? '',
+      autoComplete: type === 'password' ? (modal === 'login' || key === 'current' ? 'current-password' : 'new-password') : undefined,
       onChange: event => change(key, event.target.value),
       'aria-invalid': error ? true : undefined,
       'aria-describedby': error ? id + '-error' : undefined,
@@ -413,6 +496,7 @@ export default function Workbench() {
         if (!value && key !== 'audience') errors[key] = '请填写' + name;
         else if (value.length > limit) errors[key] = name + '最多 ' + limit + ' 个字符';
       }
+      if (!errors.product && (form.product || '').split(/\r\n|[\n\r\u2028\u2029]/).filter(line => line.trim()).length > 20) errors.product = '最多填写 20 条商品资料，每行一条';
       setFieldErrors(errors);
       const first = Object.keys(errors)[0];
       if (first) {
@@ -451,6 +535,49 @@ export default function Workbench() {
       const updated = await api('/trends');
       if (currentRoute.current.workspaceId === workspaceId) setTrends(updated);
     }, '热梗库已更新');
+    if (modal === 'dataRequest') {
+      done = await perform(async () => {
+        const body = { kind: form.kind, project: form.project };
+        const receipt = await api('/account/data-requests', { method: 'POST', body });
+        if (currentRoute.current.page === 'dataRequests' && currentRoute.current.workspaceId === workspaceId) {
+          setDataRequests(items => [{ ...receipt, ...body, created: Date.now() / 1000 }, ...(items || [])].slice(0, 30));
+        }
+      }, '申请已提交，等待管理员处理');
+    }
+    if (modal === 'recoveryRequest') {
+      await perform(async () => {
+        await api('/account/recovery/request', { method: 'POST', body: { email: form.email } });
+        open('recoveryReset', { email: form.email, sent: true });
+      });
+      return;
+    }
+    if (modal === 'recoveryReset') {
+      if (form.password !== form.confirmPassword) {
+        setFieldErrors({ confirmPassword: '两次输入的新密码不一致' });
+        requestAnimationFrame(() => document.getElementById('field-confirmPassword')?.focus());
+        return;
+      }
+      await perform(async () => {
+        await api('/account/recovery/reset', { method: 'POST', body: {
+          email: form.email, code: form.code, password: form.password,
+        } });
+        setSession(null);
+        setRequiresLogin(true);
+        open('login', { email: form.email });
+      }, '密码已重置，请重新登录');
+      return;
+    }
+    if (modal === 'password') {
+      if (form.password !== form.confirmPassword) {
+        setFieldErrors({ confirmPassword: '两次输入的新密码不一致' });
+        requestAnimationFrame(() => document.getElementById('field-confirmPassword')?.focus());
+        return;
+      }
+      done = await perform(async () => {
+        await api('/account/password', { method: 'POST', body: { current: form.current, password: form.password } });
+        setForm({});
+      }, '密码已更新，其他设备需重新登录');
+    }
     if (modal === 'login' || modal === 'register') done = await perform(async () => {
       await api('/' + modal, { method: 'POST', body: form });
       setProject(null); setProjects(null); setWorkspace(null);
@@ -530,7 +657,7 @@ export default function Workbench() {
       <div className="nav-group second"><p>管理</p>{management.map(({ key, icon: Icon }) =>
         <button key={key} className={page === key ? 'nav-item selected' : 'nav-item'} aria-current={page === key ? 'page' : undefined} onClick={() => go(key)}><Icon size={17}/>{key === 'usage' ? usageTitle : pageTitle[key]}</button>)}</div>
       <div className="sidebar-bottom">
-        <button className={page === 'help' ? 'nav-item selected' : 'nav-item'} aria-current={page === 'help' ? 'page' : undefined} onClick={() => go('help')}><CircleHelp size={17}/>帮助与文档<ArrowUpRight size={14} className="push"/></button>
+        <button className={page === 'help' ? 'nav-item selected' : 'nav-item'} aria-current={page === 'help' ? 'page' : undefined} onClick={() => go('help')}><CircleHelp size={17}/>帮助与客服<ArrowUpRight size={14} className="push"/></button>
         <div className="account"><div className="avatar">{accountEmail ? accountEmail[0].toUpperCase() : '镜'}</div><div className="account-identity"><b title={accountEmail || undefined}>{accountEmail || '镜序创作者'}</b><small>{roleNames[session?.role] || '创作成员'}</small></div><button className="icon-button push" aria-label="账户选项" onClick={() => go('settings')}><MoreHorizontal size={18}/></button></div>
       </div>
     </aside>
@@ -539,21 +666,21 @@ export default function Workbench() {
       <header className="topbar">
         <button className="icon-button mobile-menu" aria-label="菜单" aria-controls="workbench-sidebar" aria-expanded={mobile} ref={mobileToggle} onClick={() => setMobile(value => !value)}><Menu size={20}/></button>
         <div className="breadcrumbs"><button onClick={() => go('projects')}>创作空间</button><ChevronRight size={14}/><b>{page === 'usage' ? usageTitle : pageTitle[page]}</b></div>
-        <div className="top-actions"><DesktopUpdate busy={busy}/>{session && <span className="system-status"><i/>{isPreview ? '邀请预览' : session.live ? '供应商模式' : session.email === 'demo' ? '演示模式' : '工作空间'}</span>}{page !== 'projects' && session && <button className="button primary small" onClick={() => open('create')}><Plus size={16}/>新建项目</button>}</div>
+        <div className="top-actions"><DesktopUpdate busy={busy}/>{session && <span className="system-status"><i/>{isPreview ? '邀请预览' : session.live ? '供应商模式' : session.email === 'demo' ? '演示模式' : '工作空间'}</span>}{page !== 'projects' && !projectPanel && session && <button className="button primary small" onClick={() => open('create')}><Plus size={16}/>新建项目</button>}</div>
       </header>
       <main className="main-content">
         {pageLoading && <div className="panel blank" role="status">{authLoading ? '正在连接工作空间…' : '正在打开项目…'}</div>}
         {pageError && <div className="panel blank"><h2>暂时无法打开</h2><p role="alert">{pageError}</p><button className="button" onClick={() => window.location.reload()}>重试</button></div>}
         {!pageLoading && !pageError && !requiresLogin && <div className="workspace-view" key={(workspaceId || '') + ':' + page + ':' + (projectId || '')}>
         {projectPanel && <><div className="project-heading"><div><button className="back" onClick={() => go('projects')}><ArrowLeft size={14}/> 所有项目</button><div className="heading-line"><h1>{project.name}</h1><span className="badge status-badge"><i/>{project.export ? '已导出' : isSample ? '示例项目' : '制作中'}</span></div><p className="project-meta"><span><Video size={15}/> 微信视频号</span><span><Frame size={15}/> 9:16 竖屏</span><span><Clock3 size={15}/> 120 秒</span></p></div>
-          <div className="heading-actions"><button className="button" onClick={() => go('usage')}><Coins size={16}/> 费用明细</button><button className="button primary" onClick={() => go('export')}><ArrowDownToLine size={16}/> 成片导出</button></div></div>
+          <div className="heading-actions"><button className="button" onClick={() => go('usage')}><Coins size={16}/> {isPreview ? '测试额度' : '费用明细'}</button></div></div>
           <div className="workflow" aria-label="制作步骤">{steps.map(({icon: Icon, ...step}) => {
             const activeStep = page === step.key;
             const completed = step.key === 'product' ? project.facts.some(f => f.confirmed) : step.key === 'assets' ? isSample || project.assets.length : step.key === 'script' ? shots.length : step.key === 'render' ? shots.length && shots.every(b => b.clip) : project.export;
             return <button key={step.key} className={(activeStep ? ' workflow-active' : '') + (completed ? ' workflow-complete' : '')} onClick={() => go(step.key)}><span className="step-icon"><Icon size={17}/></span><span className="step-label"><b>{step.label}</b></span>{completed && !activeStep && <CheckCircle2 className="step-check" size={14}/>}</button>;
-          })}</div>
+          })}{!isSample && <button className={page === 'metrics' ? 'workflow-active' : undefined} onClick={() => go('metrics')}><span className="step-icon"><TrendingUp size={17}/></span><span className="step-label"><b>投放数据</b></span></button>}</div>
           <label className="workflow-picker"><span>制作步骤</span><select value={page} onChange={event => go(event.target.value)}>
-            {page === 'metrics' && <option value="metrics" disabled>投放数据</option>}
+            {!isSample && <option value="metrics">投放数据</option>}
             {steps.map(step => <option key={step.key} value={step.key}>{step.label}</option>)}
           </select></label>
         </>}
@@ -561,10 +688,10 @@ export default function Workbench() {
         {page === 'script' && <>
           <div className="section-heading"><div><h2>分镜工作台</h2><p>{project.pacing_issues?.length ? `节拍检查 · ${project.pacing_issues.length} 个三秒窗口待复核，首处 ${timecode(project.pacing_issues[0].start)}` : shots.length ? `${shots.length} 个镜头 · ${project.script.trope || '短剧制作'}` : '确认商品资料后生成剧本与分镜'}</p></div><div className="button-group">
             {!isSample && <button className="button" onClick={() => open('direction', {direction: project.direction || '', product_start: project.product_start})}>创作要求</button>}
-            <button className="button" disabled={busy} onClick={() => action('script', {}, '剧本生成任务已提交')}><Sparkles size={16}/>{shots.length ? '生成新剧本' : '生成剧本'}</button>
+            <button className="button" disabled={busy || !canGenerateScript} onClick={() => action('script', {}, '剧本生成任务已提交')}><Sparkles size={16}/>{shots.length ? '生成新剧本' : '生成剧本'}</button>
           </div></div>
           {shots.length ? <Storyboard project={project} current={current} select={setActive}
-            filter={filter} setFilter={setFilter} file={file} isSample={isSample} busy={busy} currency={yuan}
+            filter={filter} setFilter={setFilter} file={file} isSample={isSample} busy={busy} currency={amount => displayUsage(amount, isPreview)} budgetLabel={isPreview ? "项目测试额度" : "项目预算"}
             onEdit={() => isSample ? open('create') : open('edit', { ...current })}
             onFrame={() => action('frame', { id: current.id }, '首帧生成任务已提交')}
             onPreview={() => open('preview')} onVoice={previewDialogue} onBudget={() => go('usage')}
@@ -572,14 +699,22 @@ export default function Workbench() {
         </>}
 
         {!projectPanel && page !== 'projects' && <div className="section-heading general-heading">
-          <div><h1>{page === 'usage' ? usageTitle : pageTitle[page]}</h1><p>{({ trends: '管理适用于项目的热点与表达素材。', usage: isPreview ? '预览任务使用测试额度，不产生实际扣费。' : '查看项目成本和工作空间额度。', operations: '监控工作空间的配额、用量和生成任务。', settings: '管理成员和工作空间访问权限。', help: '了解从商品录入到成片的制作流程。' })[page]}</p></div>
+          <div><h1>{page === 'usage' ? usageTitle : pageTitle[page]}</h1><p>{({ trends: '管理适用于项目的热点与表达素材。', usage: isPreview ? '预览任务使用测试额度，不产生实际扣费。' : '查看项目成本和工作空间额度。', operations: '监控工作空间的配额、用量和生成任务。', settings: '管理成员和工作空间访问权限。', help: '了解从商品录入到成片的制作流程。', tasks: '查看当前工作空间最近 50 项制作任务。', dataRequests: '提交和查看账号或项目数据申请。' })[page]}</p></div>
         </div>}
 
         {page === 'projects' && <ProjectOverview projects={projects} error={projectsError}
-          workspaceName={session?.name} isPreview={isPreview} sampleName={sample.name} load={load} create={() => open('create')}
+          workspaceName={session?.name} isPreview={isPreview}
+          recent={projects?.find(item => item.id === recentProject?.id)}
+          resume={() => navigate({ ...homeRoute, projectId: recentProject.id,
+            page: projectPages.has(recentProject.page) ? recentProject.page : 'product',
+            shot: /^\d{2}$/.test(recentProject.shot) ? recentProject.shot : '01' })} sampleName={sample.name} load={load} create={() => open('create')}
           media={(id, name) => scopedUrl('/api/projects/' + id + '/media/' + name, workspaceId)}/>}
-        {page === 'product' && <><div className="section-heading"><div><h2>商品资料</h2><p>核对规格、宣传信息与优惠条件，确认后生成剧本。</p></div><div className="button-group"><button className="button" onClick={() => open(isSample ? 'create' : 'source')}>导入链接</button><button className="button" onClick={() => open(isSample ? 'create' : 'fact')}><Plus size={16}/>添加资料</button><button className="button primary" disabled={busy} onClick={async () => { if (await action('script', {}, '剧本生成任务已提交')) go('script'); }}><Sparkles size={16}/>生成剧本</button></div></div>
-          <div className="panel data-panel">{project.facts.map(fact => <div className="data-row" key={fact.id}><div><h3>{fact.label}</h3><p>{fact.value}</p><small>来源 · {fact.source}</small></div>{fact.confirmed ? <span className="badge product-badge"><Check size={14}/>已确认</span> : <button className="button small" disabled={busy} onClick={() => action('confirm', {id:fact.id}, '资料已确认')}>确认资料</button>}</div>)}</div></>}
+        {page === 'product' && <><div className="section-heading"><div><h2>商品资料</h2><p>核对规格、宣传信息与优惠条件，确认后生成剧本。</p></div><div className="button-group"><button className="button" onClick={() => open(isSample ? 'create' : 'source')}>导入链接</button><button className="button" onClick={() => open(isSample ? 'create' : 'fact')}><Plus size={16}/>添加资料</button><button className="button primary" disabled={busy || !canGenerateScript} onClick={async () => { if (await action('script', {}, '剧本生成任务已提交')) go('script'); }}><Sparkles size={16}/>生成剧本</button></div></div>
+          {pendingFacts.length > 0 && <p className="project-fact-review">
+            {pendingFacts.length} 条资料待确认。{!canGenerateScript && '至少确认一条才能生成剧本。'}
+            <button type="button" className="text-link" onClick={reviewProductFacts}>定位待确认资料</button>
+          </p>}
+          <div className="panel data-panel">{project.facts.map(fact => <div className="data-row" key={fact.id}><div><h3>{fact.label}</h3><p>{fact.value}</p><small>来源 · {fact.source}</small></div>{fact.confirmed ? <span className="badge product-badge"><Check size={14}/>已确认</span> : <button id={'confirm-fact-' + fact.id} className="button small" disabled={busy} onClick={() => action('confirm', {id:fact.id}, '资料已确认')}>确认资料</button>}</div>)}</div></>}
 
         {page === 'assets' && <><div className="section-heading"><div><h2>视觉资产</h2><p>上传商品的实际角度、角色定妆照与场景参考。</p></div><div className="button-group">
           {modelOptions && !isSample && <><button className="button" onClick={() => open('portraitImport')}>导入方舟尾帧</button><button className="button" disabled={portraitReserve === null} onClick={() => open('portrait')}>生成角色定妆</button></>}
@@ -599,7 +734,7 @@ export default function Workbench() {
               <button className="button small" disabled={busy} onClick={() => renderShot(shot)}>{renderedClip(shot) ? '重算片段' : shot.approved ? '渲染片段' : shot.frame ? '重算首帧' : '生成首帧'}</button>
             </div></div>) : <div className="blank">请先生成剧本</div>}</div></>}
 
-        {page === 'export' && <><div className="section-heading"><div><h2>成片导出</h2><p>导出 1080 × 1920 · 120 秒 MP4。</p></div><button className="button" onClick={() => go('metrics')}><TrendingUp size={16}/>投放数据</button></div><div className="panel blank">{project.export ? <><video className="export-video" src={file(project.export)} controls/><h3>成片已生成</h3><p className="mono">{project.export}</p><button className="button primary" onClick={() => perform(async () => { const {url} = await api('/projects/' + project.id + '/download'); window.location.assign(url); })}><ArrowDownToLine size={16}/>下载 MP4</button></> : <><Video size={33}/><h3>{readyCount} / {shots.length || 12} 个镜头已生成</h3><p>{isSample ? '新建项目后可以生成并导出成片。' : !canExport ? '审核并渲染全部镜头后，即可合成。' : '已完成所有镜头，可以开始合成。'}</p><div className="button-group">
+        {page === 'export' && <><div className="section-heading"><div><h2>成片导出</h2><p>导出 1080 × 1920 · 120 秒 MP4。</p></div></div><div className="panel blank">{project.export ? <><video className="export-video" src={file(project.export)} controls/><h3>成片已生成</h3><p className="mono">{project.export}</p><button className="button primary" onClick={() => perform(async () => { const {url} = await api('/projects/' + project.id + '/download'); window.location.assign(url); })}><ArrowDownToLine size={16}/>下载 MP4</button></> : <><Video size={33}/><h3>{readyCount} / {shots.length || 12} 个镜头已生成</h3><p>{isSample ? '新建项目后可以生成并导出成片。' : !canExport ? '审核并渲染全部镜头后，即可合成。' : '已完成所有镜头，可以开始合成。'}</p><div className="button-group">
           {!canExport && <button className="button" onClick={() => isSample ? open('create') : go(shots.length ? 'render' : 'product')}>{isSample ? '新建项目' : shots.length ? '前往审核与渲染' : '前往商品资料'}</button>}
           <button className="button primary" disabled={busy || !canExport || exporting} onClick={() => action('export', {}, '成片合成任务已提交')}><Sparkles size={16}/>{exporting ? '合成中…' : '合成成片'}</button></div></>}</div></>}
 
@@ -617,8 +752,54 @@ export default function Workbench() {
             <div key={label}><dt>{label}</dt><dd>{displayUsage(amount, isPreview)}</dd></div>)}</dl>
           <button className="button small" onClick={() => open('quota', { id: item.id, amount: (item.quota / 100).toFixed(2) })}>调整额度</button>
         </div>)}</div>}
-        {page === 'settings' && <div className="panel data-panel"><div className="data-row"><div><h3>{session?.name || '镜序工作室'}</h3><p>{session?.email === 'demo' ? '本地演示工作空间' : session?.email || '尚未登录'}</p></div><div className="button-group">{!session || session.email === 'demo' ? <><button className="button" onClick={()=>open('login')}>登录</button><button className="button primary" onClick={()=>open('register')}>邀请码注册</button></> : <button className="button" onClick={()=>perform(async()=>{ await api('/logout',{method:'POST'}); window.location.replace('/workbench'); })}>退出登录</button>}</div></div>{session?.admin && !session.invitePreview && session.email !== 'demo' && <div className="data-row"><div><h3>邀请制作成员</h3><p>{invite ? '邀请码 · '+invite : '邀请码单次有效，24 小时后过期。'}</p></div><button className="button" disabled={busy} onClick={createInvitation}>生成邀请码</button></div>}{workspace?.members?.map(member=><div className="data-row" key={member.email}><b>{member.email}</b><span className="badge still-badge">{roleNames[member.role]}</span></div>)}</div>}
-        {page === 'help' && <div className="panel data-panel">{steps.map((step,i) => <div className="data-row" key={step.key}><div><h3>{i+1}. {step.label}</h3><p>{['录入并确认商品信息。','上传角色、场景或商品参考。','生成并编辑 120 秒的短剧。','审核每个首帧后生成片段。','合成竖屏成片并下载。'][i]}</p></div><button className="button small" onClick={() => go(step.key)}>打开 <ArrowRight size={14}/></button></div>)}</div>}
+        {page === 'settings' && <div className="panel data-panel"><div className="data-row"><div><h3>{session?.name || '镜序工作室'}</h3><p>{session?.email === 'demo' ? '本地演示工作空间' : session?.email || '尚未登录'}</p></div><div className="button-group">{!session || session.email === 'demo' ? <><button className="button" onClick={()=>open('login')}>登录</button><button className="button primary" onClick={()=>open('register')}>邀请码注册</button></> : <><button className="button" onClick={() => open('password')}>修改密码</button><button className="button" onClick={()=>perform(async()=>{ await api('/logout',{method:'POST'}); window.location.replace('/workbench'); })}>退出登录</button></>}</div></div>{session?.admin && !session.invitePreview && session.email !== 'demo' && <div className="data-row"><div><h3>邀请制作成员</h3><p>{invite ? '邀请码 · '+invite : '邀请码单次有效，24 小时后过期。'}</p></div><button className="button" disabled={busy} onClick={createInvitation}>生成邀请码</button></div>}{workspace?.members?.map(member=><div className="data-row" key={member.email}><b>{member.email}</b><span className="badge still-badge">{roleNames[member.role]}</span></div>)}</div>}
+        {page === 'tasks' && <section className="panel data-panel" aria-label="最近制作任务">
+          {tasksError && <p className="library-empty" role="alert">
+            {tasks?.length ? '连接暂时中断，以下为上次同步结果。' : '暂时无法读取任务。'}正在重试。
+          </p>}
+          {!tasksError && tasks === null && <p className="library-empty" role="status">正在加载任务…</p>}
+          {!tasksError && tasks?.length === 0 && <p className="library-empty">还没有制作任务。生成剧本或渲染镜头后，进度会显示在这里。</p>}
+          {tasks?.map(task => <div className="data-row" key={task.id}>
+            <div><h3>{task.name} · {kindNames[task.kind] || '制作任务'}</h3><p>{stateNames[task.state] || '状态未知'}</p></div>
+            <button className="button small" onClick={() => load(task.project,
+              task.kind === 'export' ? 'export' : task.kind === 'script' ? 'script' : task.kind === 'portrait' ? 'assets' : 'render')}>
+              打开项目 <ArrowRight size={14}/>
+            </button>
+          </div>)}
+        </section>}
+        {page === 'dataRequests' && <section className="panel data-panel" aria-label="我的数据申请">
+          <div className="data-row"><div><h3>我的申请</h3><p>提交后由管理员处理。你可以在这里查看进度。</p></div>
+            {accountEmail && <div className="button-group">
+              <button className="button" disabled={busy} onClick={() => perform(async () => {
+                const items = await api('/account/data-requests');
+                if (currentRoute.current.page === 'dataRequests' && currentRoute.current.workspaceId === workspaceId) {
+                  setDataRequests(items);
+                  setDataRequestsError('');
+                }
+              })}>刷新状态</button>
+              <button className="button primary" disabled={busy || dataRequests === null} onClick={() => open('dataRequest', {kind: 'account-export'})}>提交申请</button>
+            </div>}
+          </div>
+          {!accountEmail ? <p className="library-empty">请登录正式账号或邀请预览账号后提交申请。</p> :
+            dataRequestsError ? <p className="library-empty" role="alert">{dataRequestsError}</p> :
+            dataRequests === null ? <p className="library-empty" role="status">正在加载申请…</p> :
+            dataRequests.length === 0 ? <p className="library-empty">暂无数据申请。</p> :
+            dataRequests.map(item => <div className="data-row" key={item.id}>
+              <div><h3>{dataRequestKinds[item.kind]}</h3>
+                {item.project && <p>{projects?.find(project => project.id === item.project)?.name || '项目 ' + item.project}</p>}
+                <small>{new Date(item.created * 1000).toLocaleString('zh-CN')}</small></div>
+              <span className="badge still-badge">{dataRequestStates[item.state]}</span>
+            </div>)}
+        </section>}
+        {page === 'help' && <div className="panel data-panel">{session?.supportEmail && <div className="data-row">
+          <div><h3>联系客服</h3><p>{session.supportEmail}</p></div>
+          <button className="button small" onClick={() => perform(
+            () => navigator.clipboard.writeText(session.supportEmail), '客服邮箱已复制')}>复制邮箱</button>
+        </div>}<div className="data-row"><div><h3>隐私与项目数据</h3><p>了解镜序如何处理账号、素材和制作任务。</p></div>
+          <div className="button-group"><a className="button small" href="/privacy?from=workbench">查看隐私说明 <ArrowRight size={14}/></a>
+            {accountEmail && <button className="button small" onClick={() => go('dataRequests')}>数据管理申请</button>}
+          </div>
+        </div>{steps.map((step,i) => <div className="data-row" key={step.key}><div><h3>{i+1}. {step.label}</h3><p>{['录入并确认商品信息。','上传角色、场景或商品参考。','生成并编辑 120 秒的短剧。','审核每个首帧后生成片段。','合成竖屏成片并下载。'][i]}</p></div>{(projectId || lastProjectId.current) && <button className="button small" onClick={() => go(step.key)}>打开 <ArrowRight size={14}/></button>}</div>)}</div>}
         {['script','assets','render','export'].includes(page) && !isSample && project.jobs.length > 0 && <div className="recent"><h3>最近生成任务</h3><JobList project={{...project,jobs:project.jobs.slice(-6)}} session={session} onResume={id => action('resume',{job:id},'已重新查询原订单')} onRetryStoryboard={id => action('script', {narrative_job:id}, '已提交原草稿重新拆镜')} onResolveScript={id => action('resolve-script', {job:id}, '已解除阻塞，可重新生成剧本')} onSettle={id => open('settle',{job:id})} onResolveCloud={resolveCloud}/></div>}
         </div>}
       </main>
@@ -647,7 +828,7 @@ export default function Workbench() {
             {formError && <p role="alert" className="form-error">{formError}</p>}
             {modal === 'createWorkspace' && <>{field('name', '工作空间名称', '例如：生活短剧制作组')}<p className="form-note">新空间的制作额度为 ¥0，由平台运营调整。</p></>}
             {modal === 'joinWorkspace' && field('code', '工作空间邀请码', '粘贴管理员发给你的邀请码')}
-            {modal === 'create' && <>{field('name','项目名称','例如：反转厨房')}{field('product','商品资料','填写商品特点、规格和来源',true)}{field('audience','目标受众','例如：视频号·家庭日常')}{field('direction','创作要求（可选）','例如：中国县城家庭短剧，夜里同一间客厅，商品在 60–70 秒出现。',true)}</>}
+            {modal === 'create' && <>{field('name','项目名称','例如：反转厨房')}{field('product','商品资料','每行一条，最多 20 条。填写商品特点、规格和来源。',true)}{field('audience','目标受众','例如：视频号·家庭日常')}{field('direction','创作要求（可选）','例如：中国县城家庭短剧，夜里同一间客厅，商品在 60–70 秒出现。',true)}</>}
             {modal === 'direction' && field('direction','下次生成时使用','填写人物、故事背景、开场冲突或商品出现的时间。',true)}
             {(modal === 'direction' || modal === 'create') && <label className="field">商品首现<select value={form.product_start ?? ''} onChange={event => change('product_start', event.target.value === '' ? null : Number(event.target.value))}>
               <option value="">由剧情安排</option>{Array.from({length:12}, (_, index) => index * 10).map(start => <option value={start} key={start}>{timecode(start)}–{timecode(start + 10)}</option>)}
@@ -667,8 +848,44 @@ export default function Workbench() {
             {modal === 'trend' && <>{field('text','热梗内容','')}{field('source','来源','')}{field('date','发布日期','',false,'date')}{field('expires','到期日期','',false,'date')}{field('tags','适用标签','家庭，职场')}</>}
             {modal === 'csv' && <>{field('csv','粘贴 CSV','version,date,impressions,retained_3s,mid_views,clicks,orders',true)}<label className="field">或读取 CSV 文件<input type="file" accept=".csv,text/csv" onChange={async e=>{ if(e.target.files[0]) change('csv',await e.target.files[0].text()); }}/></label></>}
             {modal === 'settle' && field('amount','实际费用（元）','0.00',false,'text')}{modal === 'quota' && field('amount','工作空间额度（元）','0.00',false,'text')}
-            {(modal === 'login' || modal === 'register' || (!modal && requiresLogin)) && <>{field('email','邮箱','name@example.com',false,'email')}{field('password','密码','至少 10 个字符',false,'password')}{modal === 'register' && <>{field('code','邀请码','')}{field('workspace','工作空间名称','新建工作空间时填写')}</>}<button type="button" className="text-link" onClick={()=>{ setModal(modal==='register'?'login':'register'); }}>{modal==='register'?'返回登录':'使用邀请码注册'}</button></>}
-            <div className="modal-actions">{modal === "edit" && <button type="button" className="button" onClick={()=>open("refine",{id:form.id})}><Sparkles size={15}/>自动修订本镜</button>}{!requiresLogin && <button className="button" type="button" onClick={()=>setModal('')}>取消</button>}<button className="button primary" type={requiresLogin && !modal ? 'button' : 'submit'} disabled={busy} onClick={requiresLogin && !modal ? ()=>setModal('login') : undefined}>{busy ? '处理中…' : requiresLogin && !modal ? '继续登录' : modal === 'login' ? '登录' : '确认'}</button></div>
+            {modal === 'login' && (recoveryEnabled ?
+              <button type="button" className="text-link" onClick={() => open('recoveryRequest', { email: form.email })}>忘记密码</button> :
+              <p>忘记密码时，请联系邀请你使用镜序的管理员协助重置。</p>)}
+            {(modal === 'recoveryRequest' || modal === 'recoveryReset') && <>
+              {form.sent && <p role="status">如果该邮箱已注册，镜序会发送重置码。重置码 15 分钟内有效。</p>}
+              {field('email', '邮箱', 'name@example.com', false, 'email')}
+              {modal === 'recoveryReset' && <>
+                {field('code', '重置码', '粘贴邮件中的重置码')}
+                {field('password', '新密码', '至少 10 个字符', false, 'password')}
+                {field('confirmPassword', '确认新密码', '', false, 'password')}
+                <button type="button" className="text-link" onClick={() => open('recoveryRequest', { email: form.email })}>重新获取</button>
+              </>}
+              {modal === 'recoveryRequest' && <button type="button" className="text-link"
+                onClick={() => open('recoveryReset', { email: form.email })}>我已有重置码</button>}
+              <button type="button" className="text-link" onClick={() => open('login', { email: form.email })}>返回登录</button>
+            </>}
+            {modal === 'dataRequest' && <>
+              <label className="field">申请类型<select value={form.kind} onChange={event => {
+                change('kind', event.target.value); change('project', '');
+              }}>
+                {Object.entries(dataRequestKinds).filter(([kind]) => !kind.startsWith('project-') ||
+                  (session?.admin && projects?.length > 0)).map(([kind, label]) =>
+                    <option key={kind} value={kind}>{label}</option>)}
+              </select></label>
+              {form.kind?.startsWith('project-') && <label className="field">项目<select required value={form.project || ''}
+                onChange={event => change('project', event.target.value)}>
+                <option value="">请选择项目</option>
+                {projects?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select></label>}
+              <p>{form.kind?.endsWith('-delete') ? '管理员会先核实范围与权限。提交申请不会立即删除数据。' : '管理员核实申请后会与你确认数据交付方式。'}</p>
+            </>}
+            {modal === 'password' && <><p>修改后，其他设备需要重新登录。</p>
+              {field('current','当前密码','',false,'password')}
+              {field('password','新密码','至少 10 个字符',false,'password')}
+              {field('confirmPassword','确认新密码','',false,'password')}
+            </>}
+            {(modal === 'login' || modal === 'register' || (!modal && requiresLogin)) && <>{field('email','邮箱','name@example.com',false,'email')}{field('password','密码','至少 10 个字符',false,'password')}{modal === 'register' && <>{field('code','邀请码','单次有效，发放后 24 小时内使用')}{field('workspace','工作空间名称','新建工作空间时填写')}</>}<button type="button" className="text-link" onClick={()=>{ setModal(modal==='register'?'login':'register'); }}>{modal==='register'?'返回登录':'使用邀请码注册'}</button></>}
+            <div className="modal-actions">{modal === "edit" && <button type="button" className="button" onClick={()=>open("refine",{id:form.id})}><Sparkles size={15}/>自动修订本镜</button>}{!requiresLogin && <button className="button" type="button" onClick={()=>setModal('')}>取消</button>}<button className="button primary" type={requiresLogin && !modal ? 'button' : 'submit'} disabled={busy} onClick={requiresLogin && !modal ? ()=>setModal('login') : undefined}>{busy ? '处理中…' : requiresLogin && !modal ? '继续登录' : modal === 'login' ? '登录' : modal === 'register' ? '创建账号' : modal === 'dataRequest' ? '提交申请' : modal === 'recoveryRequest' ? '发送重置码' : modal === 'recoveryReset' ? '重置密码' : '确认'}</button></div>
           </form>}
         </Dialog.Content>
       </Dialog.Portal>

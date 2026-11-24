@@ -43,6 +43,16 @@ request_limits = Table("request_limits", schema,
                        Column("bucket", Integer, primary_key=True, index=True),
                        Column("hits", Integer, nullable=False))
 
+data_requests = Table("data_requests", schema, Column("id", String, primary_key=True),
+                      Column("email", String, nullable=False, index=True), Column("workspace", String),
+                      Column("project", String), Column("kind", String, nullable=False),
+                      Column("state", String, nullable=False), Column("created", Float, nullable=False),
+                      Column("updated", Float, nullable=False))
+
+password_resets = Table("password_resets", schema, Column("email", String, primary_key=True),
+                        Column("code", String, nullable=False), Column("created", Float, nullable=False),
+                        Column("expires", Float, nullable=False, index=True))
+
 
 def init():
     with write() as connection:
@@ -93,6 +103,12 @@ def password_hash(password, salt=None):
 
 def verifies(password, stored):
     return hmac.compare_digest(password_hash(password, stored.split(":")[0]), stored)
+
+
+def replace_password(connection, email, password):
+    connection.execute(users.update().where(users.c.email == email).values(password=password_hash(password)))
+    connection.execute(sessions.delete().where(sessions.c.email == email))
+    connection.execute(password_resets.delete().where(password_resets.c.email == email))
 
 
 def now():

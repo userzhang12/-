@@ -23,4 +23,11 @@ for live in (True, False):
             expected = "uncertain" if live else "failed"
             assert complete.call_args.args[1] == expected
 
+with patch.object(worker.config, "live_enabled", return_value=False):
+    with patch.object(worker.script, "draft") as provider, patch.object(worker, "complete") as complete:
+        worker.process({"id": "new", "kind": "script", "payload": {"live": True}, "claim_is_first": True})
+        provider.assert_not_called()
+        assert complete.call_args.args[1] == "failed"
+        assert complete.call_args.kwargs == {"rejected": True}
+
 print("PASS invalid price rejection and cross-mode supplier calls blocked")

@@ -36,7 +36,7 @@ function ProjectRows({ items, load, media, query, filter }) {
   })}</ul>;
 }
 
-export default function ProjectOverview({ projects, error, workspaceName, isPreview, sampleName, load, create, media }) {
+export default function ProjectOverview({ projects, error, workspaceName, isPreview, recent, resume, sampleName, load, create, media }) {
   const [filter, setFilter] = useState('all');
   const [input, setInput] = useState('');
   const query = input.trim().toLowerCase();
@@ -57,7 +57,7 @@ export default function ProjectOverview({ projects, error, workspaceName, isPrev
         <p className="overview-space"><span/> {workspaceName || '镜序工作室'}</p>
         <h1 id="overview-title">项目总览</h1>
         <p className="overview-summary">{empty && isPreview ? "你的邀请预览空间已就绪。" : "管理商品、剧本与分镜，跟进短剧制作进度。"}</p>
-        {!empty && <div className="overview-actions"><button className="button primary" onClick={create}><Plus size={18}/>新建项目</button></div>}
+        {!empty && <div className="overview-actions"><button className="button primary" onClick={create}><Plus size={18}/>新建项目</button>{recent && <button className="button" onClick={resume} title={recent.name}>继续上次制作</button>}</div>}
       </div>
     </section>
 

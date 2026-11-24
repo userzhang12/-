@@ -1,14 +1,15 @@
 import base64
 import io
+import ipaddress
 import json
 import math
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image, ImageEnhance, ImageOps
@@ -49,17 +50,36 @@ def image_url(path):
     return "data:image/jpeg;base64," + base64.b64encode(path.read_bytes()).decode()
 
 
+def media_destination(url):
+    parsed = httpx.URL(url)
+    allowed = {host.strip().lower() for host in os.getenv("JINGXU_MEDIA_HOSTS", "").split(",") if host.strip()}
+    if (parsed.scheme != "https" or parsed.port not in (None, 443) or parsed.userinfo or
+            parsed.fragment or parsed.host not in allowed):
+        raise ValueError("供应商媒体地址未获授权，请核对媒体域名配置")
+    try:
+        records = socket.getaddrinfo(parsed.host, 443, type=socket.SOCK_STREAM)
+        addresses = {ipaddress.ip_address(record[4][0]) for record in records}
+    except (OSError, ValueError) as error:
+        raise ValueError("无法解析供应商媒体域名") from error
+    if not addresses or any(not address.is_global or address.is_multicast or address.is_reserved
+                            for address in addresses):
+        raise ValueError("供应商媒体域名必须解析到公网地址")
+    # Connect to a validated address and keep the original hostname for HTTP and TLS.
+    address = next(iter(sorted(addresses, key=lambda ip: (ip.version, int(ip)))))
+    return parsed.copy_with(host=str(address)), parsed.host
+
+
 def fetch_media(url, limit=150 * 1024 * 1024):
-    parts = urlsplit(url)
-    if parts.scheme != "https" or not parts.hostname:
-        raise ValueError("供应商未返回有效媒体地址")
-    with httpx.stream("GET", url, timeout=60, follow_redirects=False) as response:
-        response.raise_for_status()
-        result = bytearray()
-        for chunk in response.iter_bytes():
-            result.extend(chunk)
-            if len(result) > limit:
-                raise ValueError("供应商媒体文件超出大小限制")
+    destination, hostname = media_destination(url)
+    with httpx.Client(timeout=60, follow_redirects=False, trust_env=False) as client:
+        with client.stream("GET", destination, headers={"Host": hostname},
+                           extensions={"sni_hostname": hostname}) as response:
+            response.raise_for_status()
+            result = bytearray()
+            for chunk in response.iter_bytes():
+                if len(result) + len(chunk) > limit:
+                    raise ValueError("供应商媒体文件超出大小限制")
+                result.extend(chunk)
     return result
 
 

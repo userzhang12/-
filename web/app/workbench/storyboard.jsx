@@ -23,7 +23,7 @@ function clipClass(shot) {
 }
 
 export default function Storyboard({ project, current, select, filter, setFilter, file, isSample,
-  busy, onEdit, onFrame, onPreview, onVoice, voicePreview, onBudget, currency }) {
+  busy, onEdit, onFrame, onPreview, onVoice, voicePreview, onBudget, currency, budgetLabel }) {
   const shots = project.script.beats;
   const total = shots.at(-1).end;
   const filtered = shots.filter(shot => matchesFilter(filter, shot));
@@ -136,7 +136,7 @@ export default function Storyboard({ project, current, select, filter, setFilter
         </Tabs.Root>
         {isSample ? <div className="studio-inspector-actions sample-actions"><p>这是只读示例。新建项目后可编辑和生成分镜。</p><button className="button primary" onClick={onEdit}>新建项目以编辑</button></div> :
           <div className="studio-inspector-actions"><button className="button" onClick={onEdit}><Settings2 size={15}/>编辑分镜</button><button className="button primary" disabled={busy} onClick={onFrame}><Sparkles size={15}/>{current.frame ? '重算首帧' : '生成首帧'}</button></div>}
-        <button className="studio-budget" onClick={onBudget}><Coins size={15}/><span>项目预算</span><span className="budget-track"><i style={{width: ratio * 100 + '%'}}/></span><strong>{currency(used)}</strong><small>/ {currency(project.budget)}</small></button>
+        <button className="studio-budget" onClick={onBudget}><Coins size={15}/><span>{budgetLabel}</span><span className="budget-track"><i style={{width: ratio * 100 + '%'}}/></span><strong>{currency(used)}</strong><small>/ {currency(project.budget)}</small></button>
       </aside>
     </div>
 

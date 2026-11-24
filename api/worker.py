@@ -27,8 +27,12 @@ def next_job():
         query = select(jobs).where(jobs.c.state == "queued").order_by(jobs.c.created).limit(1).with_for_update(skip_locked=True)
         job = connection.execute(query).mappings().first()
         if job:
-            connection.execute(jobs.update().where(jobs.c.id == job["id"]).values(state="running", updated=now()))
-        return job
+            result = job["result"] or {}
+            first = not result.get("claimed") and not result.get("order") and not result.get("message")
+            connection.execute(jobs.update().where(jobs.c.id == job["id"]).values(
+                state="running", updated=now(), result={**result, "claimed": True}))
+            return {**job, "claim_is_first": first}
+        return None
 
 
 def apply_result(connection, job, result):
@@ -121,10 +125,15 @@ def heartbeat(job_id):
 
 def process(job):
     handlers = {"frame": media.frame, "clip": media.clip, "export": media.compose, "portrait": media.portrait}
+    payload = job["payload"]
+    if payload["live"] != config.live_enabled():
+        if not (job.get("result") or {}).get("order") and job.get("claim_is_first"):
+            complete(job, "failed", {"message": "任务计费模式与 Worker 配置不一致，未调用供应商"}, rejected=True)
+        else:
+            complete(job, "uncertain" if payload["live"] else "failed",
+                     {"message": "任务计费模式与 Worker 配置不一致，请核对原任务"})
+        return
     try:
-        payload = job["payload"]
-        if payload["live"] != config.live_enabled():
-            raise ValueError("任务计费模式与 Worker 配置不一致，未调用供应商")
         with heartbeat(job["id"]):
             if job["kind"] == "script":
                 result = script.draft(payload["document"], payload["trends"], (payload.get("beat") or {}).get("id"),

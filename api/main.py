@@ -10,15 +10,18 @@ from datetime import date
 from typing import Annotated, NamedTuple
 
 import httpx
-from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from sqlalchemy import select, text as sql_text
+from sqlalchemy import func, select, text as sql_text
 
-from . import assets, config, script, security, voice
-from .store import (digest, engine, init, invites, jobs, lookup, memberships, now, operators, password_hash, preview_invites, project_row,
-                    projects, save_project, sessions, trends, uid, users, verifies, workspaces, write)
+from . import assets, config, recovery, script, security, voice
+from .store import (data_requests, digest, engine, init, invites, jobs, lookup, memberships, now, operators, password_hash, preview_invites, project_row,
+                    projects, replace_password, save_project, sessions, trends, uid, users, verifies, workspaces, write)
 
 BUDGET = 4950
+PREVIEW_PROJECT_LIMIT = 20
+PREVIEW_ASSET_LIMIT = 100
+PREVIEW_UPLOAD_BYTES = 256 * 1024 * 1024
 LIMITS = {"script": 150, "frame": 800, "clip": 3000, "export": 400, "retry": 600}
 LOCAL_PRICES = {"script": 10, "frame": 30, "clip": 200, "export": 60}
 LIVE = config.live_enabled()
@@ -151,9 +154,11 @@ def get_session(access: Access):
     with engine.connect() as connection:
         choices = workspace_choices(connection, access)
     record = next(row for row in choices if row["id"] == access.workspace)
+    support = os.getenv("JINGXU_SUPPORT_EMAIL", "").strip()
+    support = support if len(support) <= 254 and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", support) else None
     return {"workspace": access.workspace, "name": record["name"], "admin": access.admin, "role": access.role,
             "email": access.email, "live": LIVE, "invitePreview": INVITE_PREVIEW, "operator": is_operator(access.email), "workspaces": choices,
-            "canCreateWorkspace": not INVITE_PREVIEW and any(row["role"] == "owner" for row in choices)}
+            "supportEmail": support, "canCreateWorkspace": not INVITE_PREVIEW and any(row["role"] == "owner" for row in choices)}
 
 
 @app.post("/api/workspaces", status_code=201)
@@ -192,7 +197,7 @@ def login(body: dict, response: Response, request: Request):
     password = text(body.get("password", ""), 128, True)
     security.limit_request(request, "login", 30, account=email)
     with write() as connection:
-        row = lookup(connection, users, users.c.email == email)
+        row = lookup(connection, users, users.c.email == email, True)
         need(row and verifies(password, row["password"]), "邮箱或密码错误", 401)
         session_cookie(connection, response, email)
     return {"ok": True}
@@ -233,6 +238,98 @@ def register(body: dict, response: Response, request: Request):
         if admin and operator_address(email):
             connection.execute(operators.insert().values(email=email))
         session_cookie(connection, response, email)
+    return {"ok": True}
+
+
+@app.get("/api/account/recovery")
+def recovery_status():
+    return {"enabled": recovery.settings() is not None}
+
+
+@app.post("/api/account/recovery/request", status_code=202)
+def request_password_reset(body: dict, request: Request, background: BackgroundTasks):
+    settings = recovery.settings()
+    need(settings, "邮件找回暂未开通，请联系部署管理员", 503)
+    email = text(body.get("email", ""), 254, True).lower()
+    need(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email), "邮箱格式无效")
+    security.limit_request(request, "password-reset-request", 10, account=email)
+    background.add_task(recovery.deliver, email, settings)
+    return {"ok": True}
+
+
+@app.post("/api/account/recovery/reset")
+def reset_password(body: dict, request: Request, response: Response):
+    need(recovery.settings(), "邮件找回暂未开通，请联系部署管理员", 503)
+    email = text(body.get("email", ""), 254, True).lower()
+    code = text(body.get("code", ""), 64, True)
+    password = text(body.get("password", ""), 128, True)
+    need(len(password) >= 10, "新密码至少需要 10 个字符")
+    security.limit_request(request, "password-reset-redeem", 15, account=email)
+    need(recovery.redeem(email, code, password), "重置码无效或已过期，请重新获取", 422)
+    response.delete_cookie("jx_session")
+    return {"ok": True}
+
+
+DATA_REQUEST_KINDS = {"account-export", "account-delete", "project-export", "project-delete"}
+
+
+@app.get("/api/account/data-requests")
+def list_data_requests(access: Access):
+    need(access.email != "demo", "请先登录镜序", 401)
+    table = data_requests
+    with engine.connect() as connection:
+        query = (select(table.c.id, table.c.kind, table.c.state, table.c.created, table.c.project)
+                 .where(table.c.email == access.email,
+                        (table.c.workspace == access.workspace) | table.c.workspace.is_(None))
+                 .order_by(table.c.created.desc()).limit(30))
+        return [dict(row) for row in connection.execute(query).mappings()]
+
+
+@app.post("/api/account/data-requests", status_code=201)
+def create_data_request(body: dict, access: Access, request: Request):
+    need(access.email != "demo", "请先登录镜序", 401)
+    kind = text(body.get("kind", ""), 30, True)
+    need(kind in DATA_REQUEST_KINDS, "请选择申请类型")
+    project = None
+    workspace = None
+    if kind.startswith("project-"):
+        need(access.admin, "请联系工作空间管理员提交项目数据申请", 403)
+        project = text(body.get("project", ""), 32, True)
+        workspace = access.workspace
+    security.limit_request(request, "data-request", 10, account=access.email)
+    table = data_requests
+    with write() as connection:
+        need(lookup(connection, users, users.c.email == access.email, True), "请先登录镜序", 401)
+        if project:
+            owned(connection, workspace, project)
+        existing = lookup(connection, table,
+                          (table.c.email == access.email) & (table.c.project == project) &
+                          (table.c.kind == kind) & (table.c.state == "pending"))
+        need(not existing, "已有同类申请等待处理", 409)
+        identifier, current = uid(), now()
+        connection.execute(table.insert().values(id=identifier, email=access.email, workspace=workspace,
+                                                 project=project, kind=kind, state="pending",
+                                                 created=current, updated=current))
+    return {"id": identifier, "state": "pending"}
+
+
+@app.post("/api/account/password")
+def change_password(body: dict, access: Access, request: Request, response: Response,
+                    jx_session: str | None = Cookie(None)):
+    need(access.email != "demo" and jx_session, "请先登录镜序", 401)
+    current = text(body.get("current", ""), 128, True)
+    password = text(body.get("password", ""), 128, True)
+    need(len(password) >= 10, "新密码至少需要 10 个字符")
+    need(current != password, "新密码需与当前密码不同")
+    security.limit_request(request, "change-password", 15, account=access.email)
+    with write() as connection:
+        account = lookup(connection, users, users.c.email == access.email, True)
+        session = lookup(connection, sessions, sessions.c.id == digest(jx_session))
+        need(account and session and session["email"] == access.email and session["expires"] > now(),
+             "请先登录镜序", 401)
+        need(verifies(current, account["password"]), "当前密码不正确", 422)
+        replace_password(connection, access.email, password)
+        session_cookie(connection, response, access.email)
     return {"ok": True}
 
 
@@ -345,14 +442,19 @@ def new_project(body: dict, access: Access):
             fields.append((key.strip(), value.strip()))
         elif line.strip():
             fields.append(("商品资料", line.strip()))
+    need(len(fields) <= 20, "新建项目时最多录入 20 条商品资料")
     facts = [{"id": uid(), "label": label, "value": value, "source": "手工录入", "confirmed": False}
-             for label, value in fields[:20]]
+             for label, value in fields]
     data = {"name": name, "audience": audience, "direction": text(body.get("direction", "")),
             "product_start": product_slot(body.get("product_start")),
             "facts": facts, "assets": [], "script": None,
             "version": 0, "refinements": 0, "export": None, "metrics": []}
     project_id = uid()
     with write() as connection:
+        if INVITE_PREVIEW:
+            lookup(connection, workspaces, workspaces.c.id == workspace, True)
+            count = connection.scalar(select(func.count()).select_from(projects).where(projects.c.workspace == workspace))
+            need(count < PREVIEW_PROJECT_LIMIT, "预览工作空间最多创建 20 个项目", 409)
         connection.execute(projects.insert().values(id=project_id, workspace=workspace, data=data, updated=now()))
     return {"id": project_id}
 
@@ -373,6 +475,17 @@ def job_source(job):
     if job["kind"] == "clip" and payload.get("dynamic_video", beat.get("dynamic") and not beat.get("product")):
         return "ark_video"
     return "local"
+
+
+@app.get("/api/tasks")
+def recent_tasks(access: Access):
+    with engine.connect() as connection:
+        query = (select(jobs.c.id, jobs.c.project, jobs.c.kind, jobs.c.state, jobs.c.updated, projects.c.data)
+                 .join(projects, (projects.c.id == jobs.c.project) & (projects.c.workspace == jobs.c.workspace))
+                 .where(jobs.c.workspace == access.workspace).order_by(jobs.c.updated.desc(), jobs.c.id.desc()).limit(50))
+        return [{"id": row.id, "project": row.project, "name": row.data["name"],
+                 "kind": row.kind, "state": row.state, "updated": row.updated}
+                for row in connection.execute(query)]
 
 
 def snapshot(workspace, project_id):
@@ -407,7 +520,12 @@ async def events(project_id: str, request: Request, access: Access):
         for _ in range(60):
             if await request.is_disconnected():
                 return
-            current = json.dumps(snapshot(workspace, project_id), ensure_ascii=False)
+            try:
+                await asyncio.to_thread(identity, request.cookies.get("jx_session"), workspace)
+                state = await asyncio.to_thread(snapshot, workspace, project_id)
+            except HTTPException:
+                return
+            current = json.dumps(state, ensure_ascii=False)
             yield f"data: {current}\n\n" if current != previous else ": heartbeat\n\n"
             previous = current
             await asyncio.sleep(2)
@@ -455,29 +573,56 @@ def download_link(project_id: str, access: Access):
     return {"url": url}
 
 
+def check_preview_upload(connection, workspace):
+    lookup(connection, workspaces, workspaces.c.id == workspace, True)
+    rows = connection.execute(select(projects.c.id, projects.c.data).where(projects.c.workspace == workspace))
+    uploads = [(project_id, item) for project_id, data in rows for item in data["assets"]]
+    need(len(uploads) < PREVIEW_ASSET_LIMIT, "预览工作空间最多上传 100 张图片", 409)
+    used = 0
+    for project_id, item in uploads:
+        for filename in {item["file"], item["cutout"]}:
+            try:
+                used += assets.path_for(project_id, filename).stat().st_size
+            except FileNotFoundError:
+                continue
+    return used
+
+
 @app.post("/api/projects/{project_id}/assets")
-def upload(project_id: str, access: Access, file: UploadFile = File(), kind: str = Form("product"), view: str = Form("正面")):
+def upload(project_id: str, request: Request, access: Access, file: UploadFile = File(),
+           kind: str = Form("product"), view: str = Form("正面")):
     workspace = access.workspace
     need(kind in {"product", "character", "scene"}, "素材类型无效")
     view = text(view, 60, True)
+    if INVITE_PREVIEW:
+        security.limit_request(request, "preview-upload", 12)
     with engine.connect() as connection:
         owned(connection, workspace, project_id)
     asset_id = uid()
     path = assets.path_for(project_id, f"{asset_id}.png")
-    try:
-        assets.image_asset(file.file.read(assets.MAX_BYTES + 1), path)
-    except (OSError, ValueError, assets.Image.DecompressionBombError) as error:
-        raise HTTPException(422, "请上传 12 MB 以内的有效图片") from error
     cutout = path.with_name(path.stem + "-cutout.png")
-    assets.publish_file(project_id, path)
-    assets.publish_file(project_id, cutout)
     item = {"id": asset_id, "kind": kind, "view": view, "file": path.name, "cutout": cutout.name, "version": 1}
-    with write() as connection:
-        row = owned(connection, workspace, project_id, True)
-        data = row["data"]
-        item["version"] = 1 + sum(a["kind"] == kind and a["view"] == view for a in data["assets"])
-        data["assets"].append(item)
-        save_project(connection, row, data)
+    try:
+        try:
+            assets.image_asset(file.file.read(assets.MAX_BYTES + 1), path)
+        except (OSError, ValueError, assets.Image.DecompressionBombError) as error:
+            raise HTTPException(422, "请上传 12 MB 以内的有效图片") from error
+        assets.publish_file(project_id, path)
+        assets.publish_file(project_id, cutout)
+        with write() as connection:
+            row = owned(connection, workspace, project_id, True)
+            if INVITE_PREVIEW:
+                used = check_preview_upload(connection, workspace)
+                need(used + path.stat().st_size + cutout.stat().st_size <= PREVIEW_UPLOAD_BYTES,
+                     "预览工作空间的图片存储已达到 256 MiB 上限", 409)
+            data = row["data"]
+            item["version"] = 1 + sum(a["kind"] == kind and a["view"] == view for a in data["assets"])
+            data["assets"].append(item)
+            save_project(connection, row, data)
+    except Exception:
+        path.unlink(missing_ok=True)
+        cutout.unlink(missing_ok=True)
+        raise
     return item
 
 
@@ -639,6 +784,11 @@ def project_action(project_id: str, action: str, body: dict, access: Access):
             if body.get("order"):
                 order = text(body["order"], 100, True)
                 need(re.fullmatch(r"cgt-[a-zA-Z0-9-]{8,90}", order), "请填写方舟原始视频任务编号")
+                tracked = connection.execute(select(jobs.c.id).where(
+                    jobs.c.workspace == workspace, jobs.c.kind.in_(("portrait", "clip")),
+                    jobs.c.result["order"].as_string() == order,
+                    jobs.c.payload["live"].as_boolean().is_(True))).first()
+                need(tracked, "只能导入当前工作空间已登记的方舟订单", 404)
                 payload = {"asset_name": name, "import_order": order}
                 amount = 0
             else:

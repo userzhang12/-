@@ -22,6 +22,8 @@ docker compose --env-file deploy/production.env -f deploy/compose.yml exec -T db
   pg_dump -U jingxu -d jingxu -Fc > "jingxu-$(date +%F).dump"
 ```
 
+供应商返回的远程媒体只从 `JINGXU_MEDIA_HOSTS` 列出的 HTTPS 域名下载。该变量写入 `deploy/service.env`，使用逗号分隔的完整主机名。正式环境启用方舟之前，先填入供应商实际使用的媒体域名并在内测环境核对图像、尾帧和视频下载。预览模式的本地渲染无需该配置。
+
 ## 暂无域名时的服务器本机验证
 
 在 Ubuntu 24.04 服务器上安装 Git、Docker 和 Compose v2，然后运行：
@@ -95,3 +97,31 @@ node release/preview.mjs /path/to/jingxu-test-setup-0.1.0-x64.exe > preview-rele
 先将两个连续版本发到内测渠道，用干净 Windows 机器从安装、登录、上传、生成、下载一直走到自动升级。检查任务和账单在升级后仍可查到，并验证旧客户端能与新版 API 共存。等上述流程和实际供应商费用核对完，再晋升正式渠道。云端和 Windows 客户端可以独立发布，但需要保留旧版客户端所依赖的接口和更新文件。
 
 如果服务器使用企业出站 TLS 代理，可以在构建时追加 `-f deploy/build-ca.compose.yml`，并设置 `JINGXU_BUILD_CA_FILE` 为经过确认的 CA bundle 绝对路径。证书验证保持开启，该文件只在依赖安装步骤挂载。
+
+## 协助重置账号密码
+
+用户可以在工作空间设置中修改自己的密码。忘记密码时，部署管理员先核实申请者身份，再在服务器的交互终端运行：
+
+```bash
+docker compose --env-file deploy/production.env -f deploy/compose.yml exec api python -m api.account USER_EMAIL
+```
+
+按提示输入并确认临时密码。密码输入不会回显，现有登录会话会失效。通过可信的私密渠道交付临时密码，让用户登录后立即修改。
+
+如需启用自助找回，在 `deploy/service.env` 设置 `JINGXU_SMTP_HOST`、`JINGXU_SMTP_PORT` 和 `JINGXU_SMTP_FROM`。使用端口 465 的 TLS 或端口 587 的 STARTTLS。中继要求认证时同时设置 `JINGXU_SMTP_USER` 和 `JINGXU_SMTP_PASSWORD`。重新创建 API 容器后，登录页会出现「忘记密码」。用受控测试邮箱验证收件后再对用户开放。重置码 15 分钟有效，同一账号 2 分钟内只生成一次。
+
+## 查看与处理数据管理申请
+
+用户可从工作台的「帮助与客服」提交申请。项目申请由工作空间管理员提交。部署管理员可在受限的服务器终端查看待处理申请：
+
+```bash
+docker compose --env-file deploy/production.env -f deploy/compose.yml exec api python -m api.data_requests list
+```
+
+请求清单包含邮箱和项目标识，请通过私人渠道核实申请者、权限、处理范围和结果交付方式。对于删除请求，处理前核对正在运行的任务、对象存储和备份。完成实际处理后登记结果：
+
+```bash
+docker compose --env-file deploy/production.env -f deploy/compose.yml exec api python -m api.data_requests close REQUEST_ID completed
+```
+
+拒绝申请时用 `declined`。状态命令只记录处理结果。

@@ -364,3 +364,5 @@ select,.field input,.field select,.field textarea{color:var(--text);background:#
 
 .account-identity { min-width: 0; }
 .account-identity b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.project-fact-review { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 12px; color: var(--muted); }

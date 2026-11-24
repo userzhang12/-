@@ -136,7 +136,7 @@ export default async function Download() {
 
     <footer className="site-footer"><div className="site-container">
       <a href="#top" className="site-brand"><span><ScanLine size={19}/></span>镜序</a>
-      <nav aria-label="页脚导航"><a href="#product">产品介绍</a><a href="#windows">客户端下载</a><a href="#questions">常见问题</a></nav>
+      <nav aria-label="页脚导航"><a href="#product">产品介绍</a><a href="#windows">客户端下载</a><a href="#questions">常见问题</a><a href="/privacy">隐私说明</a></nav>
     </div></footer>
   </div>;
 }

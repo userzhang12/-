@@ -144,3 +144,8 @@
 }
 
 #preview-notice { max-width: 46ch; margin: 0 0 12px; }
+
+.site-privacy { max-width: 760px; padding-block: clamp(30px, 8vw, 90px); }
+.site-privacy h1 { margin-block: 22px 34px; }
+.site-privacy section + section { margin-top: 24px; }
+.site-privacy p { margin-top: 8px; line-height: 1.8; }

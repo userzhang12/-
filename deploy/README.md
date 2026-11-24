@@ -133,7 +133,7 @@ docker compose --env-file deploy/production.env -f deploy/compose.yml exec api p
 
 ```bash
 docker compose --env-file deploy/production.env -f deploy/compose.yml \
-  run --rm --no-deps api python -c 'from api.config import check_deployment; check_deployment()'
+  run --build --rm --no-deps api python -c 'from api.config import check_deployment; check_deployment()'
 ```
 
 3. 由部署管理员在服务器交互终端签发单次邀请码。示例额度为 1000 分。现有预览账号可以继续登录，需要由管理员单独授权真实生成。调额命令设置工作空间总上限，已结算和预留仍计入额度。

@@ -53,6 +53,10 @@ password_resets = Table("password_resets", schema, Column("email", String, prima
                         Column("code", String, nullable=False), Column("created", Float, nullable=False),
                         Column("expires", Float, nullable=False, index=True))
 
+live_invites = Table("live_invites", schema, Column("id", String, primary_key=True),
+                     Column("expires", Float, nullable=False), Column("quota", Integer, nullable=False))
+live_workspaces = Table("live_workspaces", schema, Column("workspace", String, primary_key=True))
+
 
 def init():
     with write() as connection:

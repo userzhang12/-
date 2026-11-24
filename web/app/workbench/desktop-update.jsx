@@ -16,9 +16,9 @@ export default function DesktopUpdate({ busy }) {
   }, []);
   if (!state || state.channel === 'dev') return null;
 
-  if (state.channel === 'test') {
+  if (['test', 'unsigned'].includes(state.channel)) {
     return <a className="button small" href="/download#windows" title="前往官网下载 Windows 安装包">
-      <ArrowDownToLine size={15}/>预览版 v{state.version}
+      <ArrowDownToLine size={15}/>{state.channel === 'test' ? '预览版' : 'Windows 版'} v{state.version}
     </a>;
   }
 

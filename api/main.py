@@ -15,25 +15,26 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import func, select, text as sql_text
 
 from . import assets, config, recovery, script, security, voice
-from .store import (data_requests, digest, engine, init, invites, jobs, lookup, memberships, now, operators, password_hash, preview_invites, project_row,
+from .store import (data_requests, digest, engine, init, invites, jobs, live_invites, live_workspaces, lookup, memberships, now, operators, password_hash, preview_invites, project_row,
                     projects, replace_password, save_project, sessions, trends, uid, users, verifies, workspaces, write)
 
 BUDGET = 4950
-PREVIEW_PROJECT_LIMIT = 20
-PREVIEW_ASSET_LIMIT = 100
-PREVIEW_UPLOAD_BYTES = 256 * 1024 * 1024
+CONTROLLED_PROJECT_LIMIT = 20
+CONTROLLED_ASSET_LIMIT = 100
+CONTROLLED_UPLOAD_BYTES = 256 * 1024 * 1024
 LIMITS = {"script": 150, "frame": 800, "clip": 3000, "export": 400, "retry": 600}
 LOCAL_PRICES = {"script": 10, "frame": 30, "clip": 200, "export": 60}
 LIVE = config.live_enabled()
 INVITE_PREVIEW = config.invite_preview_enabled()
-DEMO = not INVITE_PREVIEW and not LIVE and os.getenv("JINGXU_DEMO", "1") == "1"
+MANAGED_LIVE = config.managed_live_enabled()
+DEMO = not MANAGED_LIVE and not INVITE_PREVIEW and not LIVE and os.getenv("JINGXU_DEMO", "1") == "1"
 SESSION_AGE = 86400 * 7
 LINK_TTL = 300
 
 
 @asynccontextmanager
 async def lifespan(_):
-    config.check_invite_preview()
+    config.check_deployment()
     init()
     with write() as connection:
         if DEMO and not lookup(connection, workspaces, workspaces.c.id == "demo"):
@@ -158,12 +159,12 @@ def get_session(access: Access):
     support = support if len(support) <= 254 and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", support) else None
     return {"workspace": access.workspace, "name": record["name"], "admin": access.admin, "role": access.role,
             "email": access.email, "live": LIVE, "invitePreview": INVITE_PREVIEW, "operator": is_operator(access.email), "workspaces": choices,
-            "supportEmail": support, "canCreateWorkspace": not INVITE_PREVIEW and any(row["role"] == "owner" for row in choices)}
+            "supportEmail": support, "managedLive": MANAGED_LIVE, "canCreateWorkspace": not MANAGED_LIVE and not INVITE_PREVIEW and any(row["role"] == "owner" for row in choices)}
 
 
 @app.post("/api/workspaces", status_code=201)
 def create_workspace(body: dict, access: Access):
-    need(not INVITE_PREVIEW, "预览账号使用独立工作空间", 403)
+    need(not (INVITE_PREVIEW or MANAGED_LIVE), "工作空间由部署管理员发放", 403)
     name = text(body.get("name", ""), 60, True)
     with write() as connection:
         owner = lookup(connection, memberships, (memberships.c.email == access.email) & (memberships.c.role == "owner"))
@@ -176,7 +177,7 @@ def create_workspace(body: dict, access: Access):
 
 @app.post("/api/workspaces/join")
 def join_workspace(body: dict, access: Access, request: Request):
-    need(not INVITE_PREVIEW, "预览账号使用独立工作空间", 403)
+    need(not (INVITE_PREVIEW or MANAGED_LIVE), "工作空间由部署管理员发放", 403)
     security.limit_request(request, "join", 15)
     need(access.email != "demo", "请登录后加入工作空间", 403)
     code = text(body.get("code", ""), 150, True)
@@ -212,7 +213,16 @@ def register(body: dict, response: Response, request: Request):
     need(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) and len(password) >= 10, "邮箱无效或密码少于 10 字符")
     with write() as connection:
         need(not lookup(connection, users, users.c.email == email), "邮箱已注册", 409)
-        if INVITE_PREVIEW:
+        if MANAGED_LIVE:
+            invitation = lookup(connection, live_invites, live_invites.c.id == digest(code), True)
+            need(invitation and invitation["expires"] > now(), "邀请码无效、已使用或已过期", 403)
+            need(not operator_address(email), "此邮箱不能使用普通注册邀请", 403)
+            workspace, admin = uid(), True
+            name = text(body.get("workspace", "镜序工作室"), 60, True)
+            connection.execute(workspaces.insert().values(id=workspace, name=name, quota=invitation["quota"]))
+            connection.execute(live_workspaces.insert().values(workspace=workspace))
+            connection.execute(live_invites.delete().where(live_invites.c.id == digest(code)))
+        elif INVITE_PREVIEW:
             invitation = lookup(connection, preview_invites, preview_invites.c.id == digest(code), True)
             need(invitation and not invitation["used"] and invitation["expires"] > now(),
                  "预览邀请码无效、已使用或已过期", 403)
@@ -395,7 +405,7 @@ def update_quota(workspace_id: str, body: dict, access: Access):
 
 @app.post("/api/workspace/invites")
 def invite(access: Access):
-    need(not INVITE_PREVIEW, "预览邀请码仅由部署管理员发放", 403)
+    need(not (INVITE_PREVIEW or MANAGED_LIVE), "邀请码仅由部署管理员发放", 403)
     workspace = access.workspace
     need(access.admin and workspace != "demo", "邀请需要独立管理员账号", 403)
     code = uid()
@@ -451,10 +461,10 @@ def new_project(body: dict, access: Access):
             "version": 0, "refinements": 0, "export": None, "metrics": []}
     project_id = uid()
     with write() as connection:
-        if INVITE_PREVIEW:
+        if INVITE_PREVIEW or MANAGED_LIVE:
             lookup(connection, workspaces, workspaces.c.id == workspace, True)
             count = connection.scalar(select(func.count()).select_from(projects).where(projects.c.workspace == workspace))
-            need(count < PREVIEW_PROJECT_LIMIT, "预览工作空间最多创建 20 个项目", 409)
+            need(count < CONTROLLED_PROJECT_LIMIT, "工作空间最多创建 20 个项目", 409)
         connection.execute(projects.insert().values(id=project_id, workspace=workspace, data=data, updated=now()))
     return {"id": project_id}
 
@@ -573,11 +583,11 @@ def download_link(project_id: str, access: Access):
     return {"url": url}
 
 
-def check_preview_upload(connection, workspace):
+def check_controlled_upload(connection, workspace):
     lookup(connection, workspaces, workspaces.c.id == workspace, True)
     rows = connection.execute(select(projects.c.id, projects.c.data).where(projects.c.workspace == workspace))
     uploads = [(project_id, item) for project_id, data in rows for item in data["assets"]]
-    need(len(uploads) < PREVIEW_ASSET_LIMIT, "预览工作空间最多上传 100 张图片", 409)
+    need(len(uploads) < CONTROLLED_ASSET_LIMIT, "工作空间最多上传 100 张图片", 409)
     used = 0
     for project_id, item in uploads:
         for filename in {item["file"], item["cutout"]}:
@@ -594,8 +604,8 @@ def upload(project_id: str, request: Request, access: Access, file: UploadFile =
     workspace = access.workspace
     need(kind in {"product", "character", "scene"}, "素材类型无效")
     view = text(view, 60, True)
-    if INVITE_PREVIEW:
-        security.limit_request(request, "preview-upload", 12)
+    if INVITE_PREVIEW or MANAGED_LIVE:
+        security.limit_request(request, "controlled-upload", 12)
     with engine.connect() as connection:
         owned(connection, workspace, project_id)
     asset_id = uid()
@@ -611,10 +621,10 @@ def upload(project_id: str, request: Request, access: Access, file: UploadFile =
         assets.publish_file(project_id, cutout)
         with write() as connection:
             row = owned(connection, workspace, project_id, True)
-            if INVITE_PREVIEW:
-                used = check_preview_upload(connection, workspace)
-                need(used + path.stat().st_size + cutout.stat().st_size <= PREVIEW_UPLOAD_BYTES,
-                     "预览工作空间的图片存储已达到 256 MiB 上限", 409)
+            if INVITE_PREVIEW or MANAGED_LIVE:
+                used = check_controlled_upload(connection, workspace)
+                need(used + path.stat().st_size + cutout.stat().st_size <= CONTROLLED_UPLOAD_BYTES,
+                     "工作空间的图片存储已达到 256 MiB 上限", 409)
             data = row["data"]
             item["version"] = 1 + sum(a["kind"] == kind and a["view"] == view for a in data["assets"])
             data["assets"].append(item)
@@ -662,6 +672,9 @@ def choose_price(kind, beat=None, *, rate=None):
 def enqueue(connection, row, kind, payload, amount):
     workspace = row["workspace"]
     ws = lookup(connection, workspaces, workspaces.c.id == workspace, True)
+    if MANAGED_LIVE:
+        need(lookup(connection, live_workspaces, live_workspaces.c.workspace == workspace),
+             "当前工作空间尚未获得真实模型额度，请联系管理员", 403)
     records = job_records(connection, workspace)
     current = [r for r in records if r["project"] == row["id"]]
     target = payload.get("beat", {}).get("id")
@@ -979,7 +992,7 @@ def project_action(project_id: str, action: str, body: dict, access: Access):
                 need(body.get("confirmed") is True, "请先核对免费生图结果", 409)
                 connection.execute(jobs.update().where(jobs.c.id == record["id"]).values(state="failed", updated=now()))
             else:
-                need(admin and record["state"] in {"done", "failed", "uncertain"} and record["reserved"] > 0, "此任务不可结算", 409)
+                need((is_operator(access.email) if MANAGED_LIVE else admin) and record["state"] in {"done", "failed", "uncertain"} and record["reserved"] > 0, "此任务不可结算", 409)
                 cents = body.get("cents")
                 need(type(cents) is int and 0 <= cents <= 10_000_000, "结算金额无效")
                 result = dict(record["result"])

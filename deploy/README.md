@@ -125,3 +125,29 @@ docker compose --env-file deploy/production.env -f deploy/compose.yml exec api p
 ```
 
 拒绝申请时用 `declined`。状态命令只记录处理结果。
+
+## 未签名正式版与服务端额度
+
+1. 在 GitHub Actions 手工运行 **Build unsigned Jingxu Windows installer**，或在 Windows 执行 `npm --prefix desktop run build:win:unsigned`，并将 `JINGXU_APP_URL` 指向实际正式站点的 HTTPS 工作台。安装包不含供应商密钥。未签名版通过官网手动升级。
+2. 在正式环境的 `deploy/service.env` 设置 `JINGXU_INVITE_PREVIEW=0` 与 `JINGXU_MANAGED_LIVE=1`。在服务器填写 DeepSeek、方舟、已开通的模型、媒体域名及价格表。价格表使用整数分，包含 `script`、`frame`、`product_frame`、`static_clip`、`dynamic_clip_sec`、`export`。检查配置后再切换 API 和 Worker。
+
+```bash
+docker compose --env-file deploy/production.env -f deploy/compose.yml \
+  run --rm --no-deps api python -c 'from api.config import check_deployment; check_deployment()'
+```
+
+3. 由部署管理员在服务器交互终端签发单次邀请码。示例额度为 1000 分。现有预览账号可以继续登录，需要由管理员单独授权真实生成。调额命令设置工作空间总上限，已结算和预留仍计入额度。
+
+```bash
+docker compose --env-file deploy/production.env -f deploy/compose.yml \
+  exec api python -m api.live_admin issue --cents 1000
+docker compose --env-file deploy/production.env -f deploy/compose.yml \
+  exec api python -m api.live_admin quota WORKSPACE_ID --cents 1000
+```
+
+4. 使用小额测试账号发一条剧本、一张首帧和一个动态片段，并核对供应商实际账单。管理员用 `python -m api.live_admin pending` 查看留有预留的任务，核对后用 `python -m api.live_admin settle JOB_ID --cents ACTUAL_CENTS` 登记真实费用。服务器额度依赖预留和对账，同时在供应商侧配置消费限制。
+5. Windows 实机验收后，将 Actions 产物解压到服务器临时目录。如果是手动构建，使用 `node release/preview.mjs 安装包.exe > release.json` 生成清单。以下命令核验 SHA-256 和文件大小，再发布安装包和清单：
+
+```bash
+node release/install-unsigned.mjs 安装包目录 deploy/published
+```

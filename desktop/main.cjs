@@ -61,7 +61,7 @@ async function checkUpdates() {
 }
 
 function attachUpdates() {
-  if (!app.isPackaged || process.platform !== 'win32' || settings.channel === 'test') return;
+  if (!app.isPackaged || process.platform !== 'win32' || ['test', 'unsigned'].includes(settings.channel)) return;
   updater = require('electron-updater').autoUpdater;
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;

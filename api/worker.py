@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy import select
 
 from . import assets, cloud_image, config, media, script
-from .store import engine, init, jobs, lookup, now, project_row, save_project, trends, workspaces, write
+from .store import engine, init, jobs, live_workspaces, lookup, now, project_row, save_project, trends, workspaces, write
 
 log = logging.getLogger("jingxu.worker")
 LEASE = 120
@@ -133,6 +133,13 @@ def process(job):
             complete(job, "uncertain" if payload["live"] else "failed",
                      {"message": "任务计费模式与 Worker 配置不一致，请核对原任务"})
         return
+    if config.managed_live_enabled():
+        with engine.connect() as connection:
+            authorized = lookup(connection, live_workspaces, live_workspaces.c.workspace == job["workspace"])
+        if not authorized:
+            complete(job, "failed" if job.get("claim_is_first") else "uncertain",
+                     {"message": "此空间未得到真实模型额度授权"}, rejected=bool(job.get("claim_is_first")))
+            return
     try:
         with heartbeat(job["id"]):
             if job["kind"] == "script":
@@ -188,7 +195,7 @@ def refresh_trends():
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    config.check_invite_preview()
+    config.check_deployment()
     init()
     last_refresh = 0
     while True:

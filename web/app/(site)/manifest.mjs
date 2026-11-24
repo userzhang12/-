@@ -22,3 +22,12 @@ export function previewManifest(value) {
   }
   return value;
 }
+
+export function unsignedManifest(value) {
+  if (!value || value.channel !== 'unsigned' || !/^\d+\.\d+\.\d+$/.test(value.version) ||
+      value.file !== `jingxu-unsigned-setup-${value.version}-x64.exe` ||
+      !/^[a-f0-9]{64}$/.test(value.sha256) || !Number.isSafeInteger(value.bytes) || value.bytes <= 0) {
+    throw new Error('未签名正式版清单格式无效');
+  }
+  return value;
+}

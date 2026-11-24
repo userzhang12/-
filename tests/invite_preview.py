@@ -57,7 +57,7 @@ def check(root):
         assert second.get("/api/projects", params={"workspace": first_session["workspace"]}).status_code == 403
         draft = {"name": "Demo", "product": "商品：水杯"}
         assert first.post("/api/projects", json={**draft, "product": "\n".join(["水杯"] * 21)}).status_code == 422
-        with patch.object(main, "PREVIEW_PROJECT_LIMIT", 1):
+        with patch.object(main, "CONTROLLED_PROJECT_LIMIT", 1):
             created = first.post("/api/projects", json=draft)
             assert created.is_success
             assert first.post("/api/projects", json=draft).status_code == 409
@@ -67,10 +67,10 @@ def check(root):
         image = io.BytesIO()
         Image.new("RGB", (8, 8), "white").save(image, "PNG")
         file = {"file": ("cup.png", image.getvalue(), "image/png")}
-        with patch.object(main, "PREVIEW_UPLOAD_BYTES", 1):
+        with patch.object(main, "CONTROLLED_UPLOAD_BYTES", 1):
             assert first.post(upload, files=file).status_code == 409
             assert not list(Path(root, "media", project).glob("*"))
-        with patch.object(main, "PREVIEW_ASSET_LIMIT", 1):
+        with patch.object(main, "CONTROLLED_ASSET_LIMIT", 1):
             assert first.post(upload, files=file).is_success
             assert first.post(upload, files=file).status_code == 409
             assert len(list(Path(root, "media", project).glob("*"))) == 2

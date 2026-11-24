@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { basename } from 'node:path';
-import { previewManifest } from '../web/app/(site)/manifest.mjs';
+import { previewManifest, unsignedManifest } from '../web/app/(site)/manifest.mjs';
 
 const [installer] = process.argv.slice(2);
 const file = installer && basename(installer);
-const match = /^jingxu-test-setup-(\d+\.\d+\.\d+)-x64\.exe$/.exec(file || '');
-if (!match) throw new Error('用法: node release/preview.mjs jingxu-test-setup-版本-x64.exe');
+const match = /^jingxu-(test|unsigned)-setup-(\d+\.\d+\.\d+)-x64\.exe$/.exec(file || '');
+if (!match) throw new Error('用法: node release/preview.mjs jingxu-test-setup-版本-x64.exe 或 jingxu-unsigned-setup-版本-x64.exe');
 
 const handle = await open(installer, 'r');
 try {
@@ -24,8 +24,10 @@ try {
     throw new Error('Windows 安装包的 PE 头无效');
   const hash = createHash('sha256');
   for await (const data of createReadStream(installer)) hash.update(data);
-  const manifest = previewManifest({
-    channel: 'preview', version: match[1], file, sha256: hash.digest('hex'), bytes: info.size,
+  const unsigned = match[1] === 'unsigned';
+  const validate = unsigned ? unsignedManifest : previewManifest;
+  const manifest = validate({
+    channel: unsigned ? 'unsigned' : 'preview', version: match[2], file, sha256: hash.digest('hex'), bytes: info.size,
   });
   console.log(JSON.stringify(manifest, null, 2));
 } finally {

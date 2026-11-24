@@ -9,14 +9,17 @@ const slug = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/;
 
 async function main() {
   const testBuild = process.argv.includes('--test');
-  const channel = testBuild ? 'test' : process.env.JINGXU_RELEASE_CHANNEL || 'stable';
-  if (!slug.test(version) || (!testBuild && (!['stable', 'beta'].includes(channel) ||
-      (channel === 'beta') !== version.includes('-beta.')))) {
+  const unsigned = process.argv.includes('--unsigned');
+  const manual = testBuild || unsigned;
+  const channel = testBuild ? 'test' : unsigned ? 'unsigned' : process.env.JINGXU_RELEASE_CHANNEL || 'stable';
+  if ((testBuild && unsigned) || !slug.test(version) ||
+      (unsigned && version.includes('-beta.')) ||
+      (!manual && (!['stable', 'beta'].includes(channel) || (channel === 'beta') !== version.includes('-beta.')))) {
     throw new Error('正式版使用 X.Y.Z，内测版使用 X.Y.Z-beta.N');
   }
   const appUrl = workbenchEndpoint(process.env.JINGXU_APP_URL).href;
   const distribution = {};
-  if (!testBuild) {
+  if (!manual) {
     const releaseRoot = endpoint(process.env.JINGXU_RELEASE_ROOT);
     releaseRoot.pathname = releaseRoot.pathname.replace(/\/?$/, '/');
     const publisher = process.env.JINGXU_SIGNER_NAME?.trim();
@@ -39,16 +42,16 @@ async function main() {
       publish: 'never',
       config: {
         appId: channel === 'stable' ? 'studio.jingxu.desktop' : 'studio.jingxu.desktop.' + channel,
-        productName: { test: '镜序测试版', beta: '镜序内测版', stable: '镜序' }[channel],
-        artifactName: (testBuild ? 'jingxu-test-setup-' : 'jingxu-setup-') + '${version}-${arch}.${ext}',
+        productName: { test: '镜序测试版', beta: '镜序内测版', stable: '镜序', unsigned: '镜序' }[channel],
+        artifactName: (testBuild ? 'jingxu-test-setup-' : unsigned ? 'jingxu-unsigned-setup-' : 'jingxu-setup-') + '${version}-${arch}.${ext}',
         detectUpdateChannel: false,
-        directories: { output: testBuild ? 'dist-test' : 'dist' },
+        directories: { output: testBuild ? 'dist-test' : unsigned ? 'dist-unsigned' : 'dist' },
         files: ['main.cjs', 'preload.cjs', 'policy.cjs', 'distribution.json', 'package.json'],
         win: {
           executableName: 'jingxu',
           icon: 'icon.ico',
           target: ['nsis'],
-          ...(testBuild ? { signAndEditExecutable: false } : distribution.signing),
+          ...(manual ? { signAndEditExecutable: false } : distribution.signing),
         },
         nsis: { oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true },
         publish: distribution.publish || null,

@@ -4,7 +4,7 @@ import { ArrowDown, ArrowDownToLine, ChevronDown, Clapperboard, Clock3, FileText
 import HeroOcean from './hero-ocean';
 import SharkIntro from './shark-intro';
 import ProductPreview from './product-preview';
-import { previewManifest, releaseManifest } from './manifest.mjs';
+import { previewManifest, releaseManifest, unsignedManifest } from './manifest.mjs';
 
 export const metadata = {
   title: '镜序 · AI 商品短剧制作软件',
@@ -37,12 +37,12 @@ async function currentRelease(root) {
   }
 }
 
-async function currentPreview() {
+async function currentManualRelease(channel, validate) {
   const directory = process.env.JINGXU_RELEASE_DIR;
   if (!directory) return null;
   try {
-    const path = join(directory, 'preview');
-    const manifest = previewManifest(JSON.parse(await readFile(join(path, 'release.json'), 'utf8')));
+    const path = join(directory, channel);
+    const manifest = validate(JSON.parse(await readFile(join(path, 'release.json'), 'utf8')));
     const installer = await stat(join(path, manifest.file));
     return installer.isFile() && installer.size === manifest.bytes ? manifest : null;
   } catch {
@@ -52,9 +52,9 @@ async function currentPreview() {
 
 const questions = [
   ['镜序支持哪些系统？', '首发客户端面向 Windows 10 和 Windows 11 的 x64 电脑。'],
-  ['安装后需要注册账号吗？', '需要。预览版可以直接下载安装，首次注册时需填写邮箱、密码和单次邀请码。已有镜序账号可以直接登录。'],
+  ['安装后需要注册账号吗？', '需要。下载安装后，首次注册时需填写邮箱、密码和管理员发放的单次邀请码。已有镜序账号可以直接登录。'],
   ['邀请预览和正式供应商模式有什么区别？', '邀请预览使用服务器本地制作流程和测试点数。剧本使用模板，画面根据参考素材合成。实际可用的模型以当前工作空间为准。'],
-  ['安装包显示未知发布者怎么办？', '当前未签名的预览包可能触发 Windows 提示。请确认来自镜序官网，并查对下载区的 SHA-256。'],
+  ['安装包显示未知发布者怎么办？', '未签名的安装包可能触发 Windows 提示。请确认来自镜序官网，并查对下载区的 SHA-256。'],
   ['已安装的客户端需要重新下载吗？', '工作台由服务器提供，关闭并重开现有客户端即可加载网页改动。更换预览版 EXE 时，需要从官网下载并安装对应版本。'],
   ['忘记密码怎么办？', '登录页启用邮件找回时，可以通过注册邮箱收取一次性重置码。未开通邮件找回的工作空间请联系邀请人或部署管理员。'],
   ['成片可以导出成什么格式？', '可以导出适合短视频平台的 9:16 竖屏 MP4，包含配音和字幕。'],
@@ -70,12 +70,14 @@ const workflow = [
 export default async function Download() {
   const root = downloadRoot();
   const release = root ? await currentRelease(root) : null;
-  const preview = root && !release ? await currentPreview() : null;
+  const unsigned = root && !release ? await currentManualRelease('unsigned', unsignedManifest) : null;
+  const preview = root && !release && !unsigned ? await currentManualRelease('preview', previewManifest) : null;
   const installer = release ? new URL('stable/' + release.file, root).href
+    : unsigned ? new URL('unsigned/' + unsigned.file, root).href
     : preview ? new URL('preview/' + preview.file, root).href : null;
-  const version = release || preview;
+  const version = release || unsigned || preview;
   const system = 'Windows 10 / 11 · x64';
-  const versionLabel = version ? (preview ? '邀请预览版 ' : 'Windows 版 ') + version.version : '';
+  const versionLabel = version ? (preview ? '邀请预览版 ' : unsigned ? '正式版（未签名）' : 'Windows 版 ') + version.version : '';
 
   return <div className="download-site">
     <header className="site-header"><div className="site-container site-nav">
@@ -142,15 +144,15 @@ export default async function Download() {
             <h2 id="download-title">下载镜序</h2>
             <p>{system}</p>
             {version && <dl className="site-release-details">
-              <div><dt>版本</dt><dd>{version.version}{preview ? ' 邀请预览' : ''}</dd></div>
+              <div><dt>版本</dt><dd>{version.version}{preview ? ' 邀请预览' : unsigned ? ' 正式版 · 未签名' : ''}</dd></div>
               <div><dt>大小</dt><dd>{(version.bytes / 1024 / 1024).toFixed(1)} MiB</dd></div>
               {release && <div><dt>发布于</dt><dd>{release.published}</dd></div>}
             </dl>}
             {installer ? <>
-              <a className="site-action primary-action" href={installer} aria-describedby={preview ? 'preview-notice' : undefined}>
+              <a className="site-action primary-action" href={installer} aria-describedby={preview || unsigned ? 'preview-notice' : undefined}>
                 <ArrowDownToLine size={18}/> {preview ? '下载预览版 .exe' : '下载 Windows .exe'}
               </a>
-              {preview && <p id="preview-notice">此预览包未签名，Windows 可能显示「未知发布者」。注册需要单独发放的邀请码。</p>}
+              {(preview || unsigned) && <p id="preview-notice">安装包未签名，Windows 可能显示「未知发布者」。注册需要单独发放的邀请码。EXE 更新请从官网下载。</p>}
               <details id="release"><summary>{release ? '版本说明和 SHA-256' : '查看 SHA-256 校验值'}</summary>
                 {release && <p className="release-notes">{release.notes}</p>}
                 <code>{version.sha256}</code>

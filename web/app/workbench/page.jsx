@@ -647,7 +647,7 @@ export default function Workbench() {
           </button>)}
           <div className="workspace-menu-actions">
             {session?.canCreateWorkspace && <button onClick={() => openWorkspaceAction('createWorkspace')}><Plus size={15}/>新建工作空间</button>}
-            {session && !session.invitePreview && session.email !== 'demo' && <button onClick={() => openWorkspaceAction('joinWorkspace')}><Layers3 size={15}/>使用邀请码加入</button>}
+            {session && !session.invitePreview && !session.managedLive && session.email !== 'demo' && <button onClick={() => openWorkspaceAction('joinWorkspace')}><Layers3 size={15}/>使用邀请码加入</button>}
             <button onClick={() => go('settings')}><Settings2 size={15}/>工作空间设置</button>
           </div>
         </div>}
@@ -752,7 +752,7 @@ export default function Workbench() {
             <div key={label}><dt>{label}</dt><dd>{displayUsage(amount, isPreview)}</dd></div>)}</dl>
           <button className="button small" onClick={() => open('quota', { id: item.id, amount: (item.quota / 100).toFixed(2) })}>调整额度</button>
         </div>)}</div>}
-        {page === 'settings' && <div className="panel data-panel"><div className="data-row"><div><h3>{session?.name || '镜序工作室'}</h3><p>{session?.email === 'demo' ? '本地演示工作空间' : session?.email || '尚未登录'}</p></div><div className="button-group">{!session || session.email === 'demo' ? <><button className="button" onClick={()=>open('login')}>登录</button><button className="button primary" onClick={()=>open('register')}>邀请码注册</button></> : <><button className="button" onClick={() => open('password')}>修改密码</button><button className="button" onClick={()=>perform(async()=>{ await api('/logout',{method:'POST'}); window.location.replace('/workbench'); })}>退出登录</button></>}</div></div>{session?.admin && !session.invitePreview && session.email !== 'demo' && <div className="data-row"><div><h3>邀请制作成员</h3><p>{invite ? '邀请码 · '+invite : '邀请码单次有效，24 小时后过期。'}</p></div><button className="button" disabled={busy} onClick={createInvitation}>生成邀请码</button></div>}{workspace?.members?.map(member=><div className="data-row" key={member.email}><b>{member.email}</b><span className="badge still-badge">{roleNames[member.role]}</span></div>)}</div>}
+        {page === 'settings' && <div className="panel data-panel"><div className="data-row"><div><h3>{session?.name || '镜序工作室'}</h3><p>{session?.email === 'demo' ? '本地演示工作空间' : session?.email || '尚未登录'}</p></div><div className="button-group">{!session || session.email === 'demo' ? <><button className="button" onClick={()=>open('login')}>登录</button><button className="button primary" onClick={()=>open('register')}>邀请码注册</button></> : <><button className="button" onClick={() => open('password')}>修改密码</button><button className="button" onClick={()=>perform(async()=>{ await api('/logout',{method:'POST'}); window.location.replace('/workbench'); })}>退出登录</button></>}</div></div>{session?.admin && !session.invitePreview && !session.managedLive && session.email !== 'demo' && <div className="data-row"><div><h3>邀请制作成员</h3><p>{invite ? '邀请码 · '+invite : '邀请码单次有效，24 小时后过期。'}</p></div><button className="button" disabled={busy} onClick={createInvitation}>生成邀请码</button></div>}{workspace?.members?.map(member=><div className="data-row" key={member.email}><b>{member.email}</b><span className="badge still-badge">{roleNames[member.role]}</span></div>)}</div>}
         {page === 'tasks' && <section className="panel data-panel" aria-label="最近制作任务">
           {tasksError && <p className="library-empty" role="alert">
             {tasks?.length ? '连接暂时中断，以下为上次同步结果。' : '暂时无法读取任务。'}正在重试。
@@ -884,7 +884,7 @@ export default function Workbench() {
               {field('password','新密码','至少 10 个字符',false,'password')}
               {field('confirmPassword','确认新密码','',false,'password')}
             </>}
-            {(modal === 'login' || modal === 'register' || (!modal && requiresLogin)) && <>{field('email','邮箱','name@example.com',false,'email')}{field('password','密码','至少 10 个字符',false,'password')}{modal === 'register' && <>{field('code','邀请码','单次有效，发放后 24 小时内使用')}{field('workspace','工作空间名称','新建工作空间时填写')}</>}<button type="button" className="text-link" onClick={()=>{ setModal(modal==='register'?'login':'register'); }}>{modal==='register'?'返回登录':'使用邀请码注册'}</button></>}
+            {(modal === 'login' || modal === 'register' || (!modal && requiresLogin)) && <>{field('email','邮箱','name@example.com',false,'email')}{field('password','密码','至少 10 个字符',false,'password')}{modal === 'register' && <>{field('code','邀请码','填写管理员发放的邀请码')}{field('workspace','工作空间名称','新建工作空间时填写')}</>}<button type="button" className="text-link" onClick={()=>{ setModal(modal==='register'?'login':'register'); }}>{modal==='register'?'返回登录':'使用邀请码注册'}</button></>}
             <div className="modal-actions">{modal === "edit" && <button type="button" className="button" onClick={()=>open("refine",{id:form.id})}><Sparkles size={15}/>自动修订本镜</button>}{!requiresLogin && <button className="button" type="button" onClick={()=>setModal('')}>取消</button>}<button className="button primary" type={requiresLogin && !modal ? 'button' : 'submit'} disabled={busy} onClick={requiresLogin && !modal ? ()=>setModal('login') : undefined}>{busy ? '处理中…' : requiresLogin && !modal ? '继续登录' : modal === 'login' ? '登录' : modal === 'register' ? '创建账号' : modal === 'dataRequest' ? '提交申请' : modal === 'recoveryRequest' ? '发送重置码' : modal === 'recoveryReset' ? '重置密码' : '确认'}</button></div>
           </form>}
         </Dialog.Content>
@@ -954,7 +954,7 @@ function JobList({ project, session, onResume, onSettle, onResolveCloud, onResol
         {job.state === 'uncertain' && job.kind === 'script' && !job.result?.order && <button className="button small" onClick={() => onResolveScript(job.id)}>解除阻塞</button>}
         {job.state === 'failed' && narrative && <button className="button small" onClick={() => onRetryStoryboard(job.id)}>用此草稿重新拆镜</button>}
         {job.state === 'uncertain' && job.source === 'cloud_image' && <button className="button small" onClick={() => onResolveCloud(job.id)}>已核对，可重试</button>}
-        {session?.live && session.admin && job.reserved > 0 && ['done', 'failed', 'uncertain'].includes(job.state) && <button className="button small" onClick={() => onSettle(job.id)}>登记结算</button>}
+        {session?.live && (session.managedLive ? session.operator : session.admin) && job.reserved > 0 && ['done', 'failed', 'uncertain'].includes(job.state) && <button className="button small" onClick={() => onSettle(job.id)}>登记结算</button>}
       </div>
     </div>;
   }) : <div className="blank"><Coins size={28}/><h3>暂无生成账目</h3><p>提交生成任务后，可在这里查看占额与结算。</p></div>}</div>;

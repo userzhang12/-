@@ -18,3 +18,5 @@ deploy/service.env
 deploy/published/
 
 deploy/.production-env.*
+
+desktop/dist-unsigned/

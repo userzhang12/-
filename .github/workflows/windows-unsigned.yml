@@ -1,0 +1,39 @@
+name: Build unsigned Jingxu Windows installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      JINGXU_APP_URL: https://jingxu.shop/workbench
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm --prefix desktop ci
+      - run: npm --prefix desktop test
+      - run: npm --prefix desktop run build:win:unsigned
+      - name: Prepare unsigned download
+        shell: pwsh
+        run: |
+          $release = Get-ChildItem 'desktop/dist-unsigned/jingxu-unsigned-setup-*-x64.exe'
+          if (@($release).Count -ne 1) { throw 'Expected one unsigned Windows installer' }
+          $signature = Get-AuthenticodeSignature $release.FullName
+          if ($signature.Status -ne 'NotSigned') { throw "Expected an unsigned installer, got $($signature.Status)" }
+          New-Item -ItemType Directory -Path publish
+          Copy-Item $release.FullName publish
+          node release/preview.mjs $release.FullName | Set-Content -Encoding utf8NoBOM publish/release.json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not generate release manifest' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jingxu-windows-unsigned
+          path: publish/
+          if-no-files-found: error

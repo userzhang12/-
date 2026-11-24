@@ -142,6 +142,27 @@ def check_invite_preview():
         raise ValueError("邀请预览需要本地处理，请移除以下配置 " + ", ".join(blocked))
 
 
+def managed_live_enabled():
+    return os.getenv("JINGXU_MANAGED_LIVE") == "1"
+
+
+def check_deployment():
+    check_invite_preview()
+    if managed_live_enabled():
+        if invite_preview_enabled():
+            raise ValueError("正式模型服务与邀请预览不能同时启用")
+        check_live()
+        image, video = (os.environ[name] for name in ("ARK_IMAGE_MODEL", "ARK_VIDEO_MODEL"))
+        if image not in IMAGE_MODELS or video not in VIDEO_MODELS:
+            raise ValueError("正式模式需要使用镜序支持的方舟图片与视频模型 ID")
+        require_available_model(image)
+        require_available_model(video)
+        if os.getenv("JINGXU_TTS_URL"):
+            raise ValueError("正式额度管理使用本地配音，避免试听产生未计入额度的供应商费用")
+        if not os.getenv("JINGXU_MEDIA_HOSTS", "").strip():
+            raise ValueError("正式模型服务需要配置方舟媒体域名")
+
+
 def live_enabled():
     return any(os.getenv(key) for key in PROVIDER_KEYS)
 

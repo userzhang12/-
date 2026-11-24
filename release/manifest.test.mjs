@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { releaseManifest } from '../web/app/(site)/manifest.mjs';
+import { releaseManifest, unsignedManifest } from '../web/app/(site)/manifest.mjs';
 
 const sample = {
   version: '0.1.0', channel: 'stable', file: 'jingxu-setup-0.1.0-x64.exe',
@@ -25,4 +25,12 @@ test('unsigned preview filename cannot be used in a signed release manifest', as
   assert.throws(() => previewManifest({ ...preview, file: '../' + preview.file }));
   assert.throws(() => releaseManifest(preview, 'stable'));
   assert.throws(() => releaseManifest(preview, 'preview'));
+});
+
+test('unsigned formal releases have their own installer namespace', () => {
+  const unsigned = { ...sample, channel: 'unsigned', version: '1.0.0', file: 'jingxu-unsigned-setup-1.0.0-x64.exe' };
+  assert.equal(unsignedManifest(unsigned), unsigned);
+  assert.throws(() => unsignedManifest({ ...unsigned, file: '../' + unsigned.file }));
+  assert.throws(() => unsignedManifest({ ...unsigned, file: 'jingxu-test-setup-1.0.0-x64.exe' }));
+  assert.throws(() => releaseManifest(unsigned, 'stable'));
 });

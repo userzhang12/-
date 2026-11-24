@@ -53,7 +53,7 @@
 }
 .overview-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 23px; }
 .overview-actions .button { min-height: 43px; border-radius: 8px; padding-inline: 14px; }
-.overview-secondary { border-color: #ae838365; background: #2b2026bc; color: #ffe3d6; }
+
 
 .overview-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-block: 16px 24px; }
 .overview-metric {
@@ -239,3 +239,13 @@
   .sample-image { height: 144px; }
   .project-list-row { gap: 7px; }
 }
+
+
+.overview-hero-empty {
+  min-height: 0;
+  margin-bottom: 20px;
+  background: #21191d;
+}
+.overview-hero-empty .overview-hero-content { width: 100%; }
+.overview-hero-empty h1 { font-size: clamp(30px, 3vw, 44px); }
+.library-empty .button { margin-top: 12px; }

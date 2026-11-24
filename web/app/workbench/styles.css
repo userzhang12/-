@@ -361,3 +361,6 @@ select,.field input,.field select,.field textarea{color:var(--text);background:#
 @media(max-width:680px){.studio-player .icon-button,.mobile-menu{min-width:44px;height:44px}.studio-player{min-height:48px}}
 .desktop-updates{position:relative}
 .desktop-update-message{position:absolute;top:calc(100% + 4px);right:0;z-index:10;background:var(--white);border:1px solid var(--line);border-radius:6px;padding:8px;white-space:nowrap;color:var(--text);font-size:12px}
+
+.account-identity { min-width: 0; }
+.account-identity b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -16,6 +16,12 @@ export default function DesktopUpdate({ busy }) {
   }, []);
   if (!state || state.channel === 'dev') return null;
 
+  if (state.channel === 'test') {
+    return <a className="button small" href="/download#windows" title="前往官网下载 Windows 安装包">
+      <ArrowDownToLine size={15}/>预览版 v{state.version}
+    </a>;
+  }
+
   const actions = {
     available: ['download', '下载更新 ' + state.nextVersion],
     ready: ['install', '重启并更新'],

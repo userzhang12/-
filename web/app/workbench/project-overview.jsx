@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import {
-  ArrowRight, ArrowUpRight, Clapperboard, FileText, Film, FolderOpen, Layers3,
+  ArrowUpRight, Clapperboard, FileText, Film, FolderOpen, Layers3,
   Plus, Search, X,
 } from 'lucide-react';
 
@@ -36,7 +36,7 @@ function ProjectRows({ items, load, media, query, filter }) {
   })}</ul>;
 }
 
-export default function ProjectOverview({ projects, error, workspaceName, sampleName, load, create, media }) {
+export default function ProjectOverview({ projects, error, workspaceName, isPreview, sampleName, load, create, media }) {
   const [filter, setFilter] = useState('all');
   const [input, setInput] = useState('');
   const query = input.trim().toLowerCase();
@@ -44,6 +44,7 @@ export default function ProjectOverview({ projects, error, workspaceName, sample
   const selected = useMemo(() => (projects || []).filter(item =>
     (filter === 'all' || (filter === 'exported' ? item.export : !item.export)) &&
     (!query || item.name.toLowerCase().includes(query))), [projects, filter, query]);
+  const empty = !error && projects?.length === 0;
   const metrics = [
     { label: '项目总数', value: items.length, icon: Layers3 },
     { label: '已有剧本', value: items.filter(item => item.has_script).length, icon: FileText },
@@ -51,32 +52,37 @@ export default function ProjectOverview({ projects, error, workspaceName, sample
   ];
 
   return <div className="project-overview">
-    <section className="overview-hero" aria-labelledby="overview-title">
+    <section className={empty ? "overview-hero overview-hero-empty" : "overview-hero"} aria-labelledby="overview-title">
       <div className="overview-hero-content">
         <p className="overview-space"><span/> {workspaceName || '镜序工作室'}</p>
         <h1 id="overview-title">项目总览</h1>
-        <p className="overview-summary">管理商品、剧本与分镜，跟进短剧制作进度。</p>
-        <div className="overview-actions"><button className="button primary" onClick={create}><Plus size={18}/>新建项目</button>
-          <button className="button overview-secondary" onClick={() => load('sample')}>查看示例 <ArrowRight size={15}/></button></div>
+        <p className="overview-summary">{empty && isPreview ? "你的邀请预览空间已就绪。" : "管理商品、剧本与分镜，跟进短剧制作进度。"}</p>
+        {!empty && <div className="overview-actions"><button className="button primary" onClick={create}><Plus size={18}/>新建项目</button></div>}
       </div>
     </section>
 
-    <div className="overview-metrics" role="group" aria-label="项目概况">
+    {!empty && <div className="overview-metrics" role="group" aria-label="项目概况">
       {metrics.map(({ label, value, icon: Icon }) => <div className="overview-metric" key={label}>
         <span className="overview-metric-icon"><Icon size={19}/></span><div><span>{label}</span><strong>{projects ? value : '—'}</strong></div>
       </div>)}
-    </div>
+    </div>}
 
     <div className="overview-columns">
       <section className="project-library" aria-labelledby="library-title">
         <header className="overview-panel-head">
           <h2 id="library-title">我的项目</h2>
-          <div className="project-search"><Search size={15} aria-hidden="true"/>
+          {!empty && <div className="project-search"><Search size={15} aria-hidden="true"/>
             <input aria-label="搜索项目" type="search" value={input} placeholder="搜索项目名称" onChange={event => setInput(event.target.value)}/>
-            {input && <button type="button" aria-label="清除搜索" onClick={() => setInput('')}><X size={15}/></button>}</div>
+            {input && <button type="button" aria-label="清除搜索" onClick={() => setInput('')}><X size={15}/></button>}</div>}
         </header>
         {error ? <div className="library-empty"><h3>暂时无法加载项目</h3><p role="alert">{error}</p><button className="button" onClick={() => window.location.reload()}>重试</button></div> :
           projects === null ? <p className="library-empty" role="status">正在加载项目…</p> :
+          empty ? <div className="library-empty">
+            <FolderOpen size={25} aria-hidden="true"/>
+            <h3>从一件商品开始</h3>
+            <p>录入商品资料，生成剧本与分镜，再导出竖屏成片。</p>
+            <button className="button primary" onClick={create}><Plus size={16}/>新建第一个项目</button>
+          </div> :
           <Tabs.Root value={filter} onValueChange={setFilter}>
             <Tabs.List className="project-filters" aria-label="按制作状态筛选">
               {stages.map(stage => <Tabs.Trigger value={stage.value} key={stage.value}>{stage.label}</Tabs.Trigger>)}
@@ -91,7 +97,7 @@ export default function ProjectOverview({ projects, error, workspaceName, sample
         <header className="overview-panel-head"><h2 id="sample-title">示例项目</h2><Clapperboard size={17}/></header>
         <button className="overview-sample-card" onClick={() => load('sample')}>
           <div className="sample-image"><img src="/still.webp" alt=""/><span>12 镜头 · 120 秒</span></div>
-          <span className="overview-sample-info"><strong>{sampleName}</strong><small>查看剧本、分镜与台词试听</small></span>
+          <span className="overview-sample-info"><strong>{sampleName}</strong><small>只读示例 · 查看剧本、分镜与台词试听</small></span>
           <span className="sample-open" aria-hidden="true"><ArrowUpRight size={17}/></span>
         </button>
       </section>

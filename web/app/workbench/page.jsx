@@ -38,6 +38,7 @@ const kindNames = { script: '剧本生成', frame: '首帧生成', clip: '片段
 const stateNames = { queued: '排队中', running: '处理中', done: '已完成', failed: '失败', uncertain: '待核对' };
 const sourceNames = { deepseek: 'DeepSeek API', ark_image: '火山方舟 · 生图', ark_video: '火山方舟 · 生视频', ark_reference: '火山方舟 · 尾帧导入', cloud_image: 'Cloudflare Workers AI · 免费额度', local: '本机处理', demo: '演示' };
 const roleNames = { owner: '空间主账号', admin: '空间管理员', member: '创作成员' };
+const displayUsage = (value, isPreview) => isPreview ? (value || 0) + ' 点' : yuan(value);
 const yuan = value => '¥' + ((value || 0) / 100).toFixed(2);
 
 function readRoute(search) {
@@ -133,6 +134,9 @@ export default function Workbench() {
   const api = (url, options) => requestJson(scopedUrl(url, workspaceId), options);
   const project = projectId === 'sample' ? sample : snapshot?.id === projectId ? snapshot : null;
   const current = project?.script?.beats.find(b => b.id === active) || project?.script?.beats[0];
+  const isPreview = Boolean(session?.invitePreview);
+  const accountEmail = session?.email && session.email !== 'demo' ? session.email : '';
+  const usageTitle = isPreview ? '测试额度' : pageTitle.usage;
   const isSample = projectId === 'sample';
 
   function navigate(destination, mode = 'push') {
@@ -453,7 +457,7 @@ export default function Workbench() {
       try { setSession(await api('/session')); }
       catch (error) { if (error.status !== 403 || !workspaceId) throw error; switchWorkspace(null); }
       setRequiresLogin(false);
-    }, '已进入工作空间');
+    }, modal === 'register' ? '账号已创建，已进入工作空间' : '已进入工作空间');
     if (done && currentRoute.current.workspaceId === workspaceId) setModal('');
   }
 
@@ -524,18 +528,18 @@ export default function Workbench() {
       <div className="nav-group"><p>创作空间</p>{navigation.map(({ key, icon: Icon }) =>
         <button key={key} className={sidebarPage === key ? 'nav-item selected' : 'nav-item'} aria-current={sidebarPage === key ? (page === key ? 'page' : 'location') : undefined} onClick={() => go(key)}><Icon size={17}/>{pageTitle[key]}</button>)}</div>
       <div className="nav-group second"><p>管理</p>{management.map(({ key, icon: Icon }) =>
-        <button key={key} className={page === key ? 'nav-item selected' : 'nav-item'} aria-current={page === key ? 'page' : undefined} onClick={() => go(key)}><Icon size={17}/>{pageTitle[key]}</button>)}</div>
+        <button key={key} className={page === key ? 'nav-item selected' : 'nav-item'} aria-current={page === key ? 'page' : undefined} onClick={() => go(key)}><Icon size={17}/>{key === 'usage' ? usageTitle : pageTitle[key]}</button>)}</div>
       <div className="sidebar-bottom">
         <button className={page === 'help' ? 'nav-item selected' : 'nav-item'} aria-current={page === 'help' ? 'page' : undefined} onClick={() => go('help')}><CircleHelp size={17}/>帮助与文档<ArrowUpRight size={14} className="push"/></button>
-        <div className="account"><div className="avatar">{session?.email && session.email !== 'demo' ? session.email[0].toUpperCase() : '镜'}</div><div><b>{session?.email && session.email !== 'demo' ? session.email.split('@')[0] : '镜序创作者'}</b><small>{roleNames[session?.role] || '创作成员'}</small></div><button className="icon-button push" aria-label="账户选项" onClick={() => go('settings')}><MoreHorizontal size={18}/></button></div>
+        <div className="account"><div className="avatar">{accountEmail ? accountEmail[0].toUpperCase() : '镜'}</div><div className="account-identity"><b title={accountEmail || undefined}>{accountEmail || '镜序创作者'}</b><small>{roleNames[session?.role] || '创作成员'}</small></div><button className="icon-button push" aria-label="账户选项" onClick={() => go('settings')}><MoreHorizontal size={18}/></button></div>
       </div>
     </aside>
     {mobile && <button className="sidebar-scrim" aria-label="关闭导航" tabIndex={-1} onClick={closeMobileMenu}/>}
     <div className="main" inert={mobile || undefined}>
       <header className="topbar">
         <button className="icon-button mobile-menu" aria-label="菜单" aria-controls="workbench-sidebar" aria-expanded={mobile} ref={mobileToggle} onClick={() => setMobile(value => !value)}><Menu size={20}/></button>
-        <div className="breadcrumbs"><button onClick={() => go('projects')}>创作空间</button><ChevronRight size={14}/><b>{pageTitle[page]}</b></div>
-        <div className="top-actions"><DesktopUpdate busy={busy}/>{session && <span className="system-status"><i/>{session.live ? '供应商模式' : '演示模式'}</span>}{page !== 'projects' && session && <button className="button primary small" onClick={() => open('create')}><Plus size={16}/>新建项目</button>}</div>
+        <div className="breadcrumbs"><button onClick={() => go('projects')}>创作空间</button><ChevronRight size={14}/><b>{page === 'usage' ? usageTitle : pageTitle[page]}</b></div>
+        <div className="top-actions"><DesktopUpdate busy={busy}/>{session && <span className="system-status"><i/>{isPreview ? '邀请预览' : session.live ? '供应商模式' : session.email === 'demo' ? '演示模式' : '工作空间'}</span>}{page !== 'projects' && session && <button className="button primary small" onClick={() => open('create')}><Plus size={16}/>新建项目</button>}</div>
       </header>
       <main className="main-content">
         {pageLoading && <div className="panel blank" role="status">{authLoading ? '正在连接工作空间…' : '正在打开项目…'}</div>}
@@ -568,11 +572,11 @@ export default function Workbench() {
         </>}
 
         {!projectPanel && page !== 'projects' && <div className="section-heading general-heading">
-          <div><h1>{pageTitle[page]}</h1><p>{({ trends: '管理适用于项目的热点与表达素材。', usage: '查看项目成本和工作空间额度。', operations: '监控工作空间的配额、用量和生成任务。', settings: '管理成员和工作空间访问权限。', help: '了解从商品录入到成片的制作流程。' })[page]}</p></div>
+          <div><h1>{page === 'usage' ? usageTitle : pageTitle[page]}</h1><p>{({ trends: '管理适用于项目的热点与表达素材。', usage: isPreview ? '预览任务使用测试额度，不产生实际扣费。' : '查看项目成本和工作空间额度。', operations: '监控工作空间的配额、用量和生成任务。', settings: '管理成员和工作空间访问权限。', help: '了解从商品录入到成片的制作流程。' })[page]}</p></div>
         </div>}
 
         {page === 'projects' && <ProjectOverview projects={projects} error={projectsError}
-          workspaceName={session?.name} sampleName={sample.name} load={load} create={() => open('create')}
+          workspaceName={session?.name} isPreview={isPreview} sampleName={sample.name} load={load} create={() => open('create')}
           media={(id, name) => scopedUrl('/api/projects/' + id + '/media/' + name, workspaceId)}/>}
         {page === 'product' && <><div className="section-heading"><div><h2>商品资料</h2><p>核对规格、宣传信息与优惠条件，确认后生成剧本。</p></div><div className="button-group"><button className="button" onClick={() => open(isSample ? 'create' : 'source')}>导入链接</button><button className="button" onClick={() => open(isSample ? 'create' : 'fact')}><Plus size={16}/>添加资料</button><button className="button primary" disabled={busy} onClick={async () => { if (await action('script', {}, '剧本生成任务已提交')) go('script'); }}><Sparkles size={16}/>生成剧本</button></div></div>
           <div className="panel data-panel">{project.facts.map(fact => <div className="data-row" key={fact.id}><div><h3>{fact.label}</h3><p>{fact.value}</p><small>来源 · {fact.source}</small></div>{fact.confirmed ? <span className="badge product-badge"><Check size={14}/>已确认</span> : <button className="button small" disabled={busy} onClick={() => action('confirm', {id:fact.id}, '资料已确认')}>确认资料</button>}</div>)}</div></>}
@@ -603,17 +607,17 @@ export default function Workbench() {
 
         {page === 'trends' && <><div className="button-group toolbar"><button className="button" onClick={() => open('trendSource')}>导入授权源</button><button className="button primary" onClick={() => open('trend', {date:new Date().toISOString().slice(0,10)})}><Plus size={16}/>添加热梗</button></div><div className="panel data-panel">{trendList.length ? trendList.map(item => <div className="data-row" key={item.text}><div><h3>{item.text}</h3><p>{item.source} · {item.tags.join(' / ')}</p></div><small>到期 {item.expires}</small></div>) : <div className="blank"><TrendingUp size={30}/><h3>还没有热点素材</h3><p>可以手工添加，也可以同步已配置的授权来源。</p></div>}</div></>}
 
-        {page === 'usage' && <>{usageStats.length > 0 && <div className="stat-grid">{usageStats.map(([label, amount, Icon]) => <div className="panel stat" key={label}><Icon size={18}/><p>{label}</p><strong>{amount == null ? '—' : yuan(amount)}</strong></div>)}</div>}
-          {project ? <><div className="section-heading"><div><h2>项目费用明细</h2><p>{project.name}</p></div></div><JobList project={project} session={session} onResume={id => action('resume', {job:id}, '已重新查询原订单')} onRetryStoryboard={id => action('script', {narrative_job:id}, '已提交原草稿重新拆镜')} onResolveScript={id => action('resolve-script', {job:id}, '已解除阻塞，可重新生成剧本')} onSettle={id => open('settle', {job:id})} onResolveCloud={resolveCloud}/></> :
-            <div className="panel blank"><Coins size={28}/><h2>选择项目查看费用</h2><button className="button" onClick={() => go('projects')}>返回项目总览</button></div>}
+        {page === 'usage' && <>{usageStats.length > 0 && <div className="stat-grid">{usageStats.map(([label, amount, Icon]) => <div className="panel stat" key={label}><Icon size={18}/><p>{label}</p><strong>{amount == null ? '—' : displayUsage(amount, isPreview)}</strong></div>)}</div>}
+          {project ? <><div className="section-heading"><div><h2>{isPreview ? '项目测试用量' : '项目费用明细'}</h2><p>{project.name}</p></div></div><JobList project={project} session={session} onResume={id => action('resume', {job:id}, '已重新查询原订单')} onRetryStoryboard={id => action('script', {narrative_job:id}, '已提交原草稿重新拆镜')} onResolveScript={id => action('resolve-script', {job:id}, '已解除阻塞，可重新生成剧本')} onSettle={id => open('settle', {job:id})} onResolveCloud={resolveCloud}/></> :
+            <div className="panel blank"><Coins size={28}/><h2>{isPreview ? '选择项目查看测试用量' : '选择项目查看费用'}</h2><button className="button" onClick={() => go('projects')}>返回项目总览</button></div>}
         </>}
         {page === 'operations' && <div className="panel data-panel">{operations.map(item => <div className="data-row workspace-usage-row" key={item.id}>
           <div><h3>{item.name}</h3><p>运行 {item.pending} · 待核对 {item.uncertain}</p></div>
           <dl>{[['总额度', item.quota], ['可用', item.quota - item.spent - item.committed], ['冻结', item.committed], ['已结算', item.spent]].map(([label, amount]) =>
-            <div key={label}><dt>{label}</dt><dd>{yuan(amount)}</dd></div>)}</dl>
+            <div key={label}><dt>{label}</dt><dd>{displayUsage(amount, isPreview)}</dd></div>)}</dl>
           <button className="button small" onClick={() => open('quota', { id: item.id, amount: (item.quota / 100).toFixed(2) })}>调整额度</button>
         </div>)}</div>}
-        {page === 'settings' && <div className="panel data-panel"><div className="data-row"><div><h3>{session?.name || '镜序工作室'}</h3><p>{session?.email === 'demo' ? '本地演示工作空间' : session?.email || '尚未登录'}</p></div><div className="button-group">{!session || session.email === 'demo' ? <><button className="button" onClick={()=>open('login')}>登录</button><button className="button primary" onClick={()=>open('register')}>邀请码注册</button></> : <button className="button" onClick={()=>perform(async()=>{ await api('/logout',{method:'POST'}); window.location.replace('/'); })}>退出登录</button>}</div></div>{session?.admin && !session.invitePreview && session.email !== 'demo' && <div className="data-row"><div><h3>邀请制作成员</h3><p>{invite ? '邀请码 · '+invite : '邀请码单次有效，24 小时后过期。'}</p></div><button className="button" disabled={busy} onClick={createInvitation}>生成邀请码</button></div>}{workspace?.members?.map(member=><div className="data-row" key={member.email}><b>{member.email}</b><span className="badge still-badge">{roleNames[member.role]}</span></div>)}</div>}
+        {page === 'settings' && <div className="panel data-panel"><div className="data-row"><div><h3>{session?.name || '镜序工作室'}</h3><p>{session?.email === 'demo' ? '本地演示工作空间' : session?.email || '尚未登录'}</p></div><div className="button-group">{!session || session.email === 'demo' ? <><button className="button" onClick={()=>open('login')}>登录</button><button className="button primary" onClick={()=>open('register')}>邀请码注册</button></> : <button className="button" onClick={()=>perform(async()=>{ await api('/logout',{method:'POST'}); window.location.replace('/workbench'); })}>退出登录</button>}</div></div>{session?.admin && !session.invitePreview && session.email !== 'demo' && <div className="data-row"><div><h3>邀请制作成员</h3><p>{invite ? '邀请码 · '+invite : '邀请码单次有效，24 小时后过期。'}</p></div><button className="button" disabled={busy} onClick={createInvitation}>生成邀请码</button></div>}{workspace?.members?.map(member=><div className="data-row" key={member.email}><b>{member.email}</b><span className="badge still-badge">{roleNames[member.role]}</span></div>)}</div>}
         {page === 'help' && <div className="panel data-panel">{steps.map((step,i) => <div className="data-row" key={step.key}><div><h3>{i+1}. {step.label}</h3><p>{['录入并确认商品信息。','上传角色、场景或商品参考。','生成并编辑 120 秒的短剧。','审核每个首帧后生成片段。','合成竖屏成片并下载。'][i]}</p></div><button className="button small" onClick={() => go(step.key)}>打开 <ArrowRight size={14}/></button></div>)}</div>}
         {['script','assets','render','export'].includes(page) && !isSample && project.jobs.length > 0 && <div className="recent"><h3>最近生成任务</h3><JobList project={{...project,jobs:project.jobs.slice(-6)}} session={session} onResume={id => action('resume',{job:id},'已重新查询原订单')} onRetryStoryboard={id => action('script', {narrative_job:id}, '已提交原草稿重新拆镜')} onResolveScript={id => action('resolve-script', {job:id}, '已解除阻塞，可重新生成剧本')} onSettle={id => open('settle',{job:id})} onResolveCloud={resolveCloud}/></div>}
         </div>}
@@ -728,7 +732,7 @@ function JobList({ project, session, onResume, onSettle, onResolveCloud, onResol
       <div><h3>{kindNames[job.kind]}</h3><small>{details.join(' · ')}</small>{request && <p className="mono" style={{overflowWrap: 'anywhere'}}>回执 {request}</p>}{narrative && <details><summary>查看故事草稿 · {narrative.title}</summary><p style={{whiteSpace:'pre-wrap'}}>{narrative.story}</p></details>}</div>
       <div className="button-group">
         <span className={'badge ' + (job.state === 'done' ? 'product-badge' : 'still-badge')}>{stateNames[job.state]}</span>
-        <span className="mono">{job.reserved > 0 ? `占额 ${yuan(job.reserved)}` : `已结算 ${yuan(job.spent)}`}</span>
+        <span className="mono">{job.reserved > 0 ? `占额 ${displayUsage(job.reserved, session?.invitePreview)}` : `已结算 ${displayUsage(job.spent, session?.invitePreview)}`}</span>
         {job.state === 'uncertain' && job.result?.order && <button className="button small" onClick={() => onResume(job.id)}>查询订单</button>}
         {job.state === 'uncertain' && job.kind === 'script' && !job.result?.order && <button className="button small" onClick={() => onResolveScript(job.id)}>解除阻塞</button>}
         {job.state === 'failed' && narrative && <button className="button small" onClick={() => onRetryStoryboard(job.id)}>用此草稿重新拆镜</button>}

@@ -17,15 +17,28 @@ vec3 swimmingPosition(vec3 point, float time) {
 `;
 
 const skinDetail = `
-float grainField(vec3 point) {
-  float ridge = sin(dot(point, vec3(33.5, 46.0, 105.0)));
-  float grain = sin(dot(point, vec3(139.0, -89.0, 52.0)) + ridge * .76);
-  float skinPatch = sin(dot(point, vec3(17.0, 22.0, -19.0)));
-  return ridge * .32 + grain * .18 + skinPatch * .50;
+float grainHash(vec3 p) {
+  p = fract(p * .1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+float grainNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(grainHash(i), grainHash(i + vec3(1,0,0)), f.x),
+        mix(grainHash(i + vec3(0,1,0)), grainHash(i + vec3(1,1,0)), f.x), f.y),
+    mix(mix(grainHash(i + vec3(0,0,1)), grainHash(i + vec3(1,0,1)), f.x),
+        mix(grainHash(i + vec3(0,1,1)), grainHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float grainField(vec3 p) {
+  return .75 * (grainNoise(p * vec3(39.0, 36.0, 52.0)) - .5)
+       + .36 * (grainNoise(p * 8.0) - .5);
 }
 `;
 
-function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBlend, waterline) {
+function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBlend, eyeRoll, waterline) {
   const skin = new three.MeshPhysicalMaterial({
     vertexColors: true,
     roughness: .47,
@@ -39,7 +52,8 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBle
     shader.uniforms.bite = bite;
     shader.uniforms.submerge = submerge;
     shader.uniforms.rigBlend = rigBlend;
-    shader.vertexShader = 'uniform float swimTime; uniform float rigBlend; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth; varying float jawDrop;\n' + swim
+    shader.uniforms.eyeRoll = eyeRoll;
+    shader.vertexShader = 'uniform float swimTime; uniform float rigBlend; uniform float bite; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth;\n' + swim
       + shader.vertexShader.replace('#include <beginnormal_vertex>', `
         #include <beginnormal_vertex>
         float slope = (swimBend(position.z + .025, swimTime) - swimBend(position.z - .025, swimTime)) / .05;
@@ -47,21 +61,16 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBle
       `).replace('#include <begin_vertex>', `
         #include <begin_vertex>
         transformed = mix(swimmingPosition(transformed, swimTime), transformed, rigBlend);
+        float gillSpan = smoothstep(.56, .75, position.z) * (1.0 - smoothstep(1.38, 1.57, position.z));
+        float gillSide = smoothstep(.39, .61, abs(position.x)) * (1.0 - smoothstep(.27, .40, abs(position.y)));
+        transformed.x += sign(position.x) * gillSpan * gillSide * (.008 * sin(swimTime * 6.2) + .027 * bite);
         bitePosition = position;
         waterDepth = max(0.0, -(modelMatrix * vec4(transformed, 1.0)).y - 0.12);
         scanPosition = clamp((2.55 - position.z) / 5.65, 0.0, 1.0);
-      `).replace('#include <morphtarget_vertex>', `
-        #include <morphtarget_vertex>
-        jawDrop = max(0.0, position.y - transformed.y);
       `);
-    shader.fragmentShader = 'uniform float swimTime; uniform float assembly; uniform float bite; uniform float submerge; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth; varying float jawDrop;\n'
+    shader.fragmentShader = 'uniform float swimTime; uniform float assembly; uniform float bite; uniform float submerge; uniform float eyeRoll; varying float scanPosition; varying vec3 bitePosition; varying float waterDepth;\n'
       + skinDetail + shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
         #include <clipping_planes_fragment>
-        float mouthFront = smoothstep(1.35, 2.06, bitePosition.z);
-        float mouthWidth = 1.0 - smoothstep(0.43, 0.55, abs(bitePosition.x));
-        if (bite > 0.025 && bitePosition.z > 1.30 && mouthWidth > 0.01
-            && bitePosition.y < (-0.17 + 0.25 * mouthFront) * mouthWidth + bite * 0.046
-            && (abs(bitePosition.x) < .38 || jawDrop < .27 * bite)) discard;
         if (assembly < 1.0) {
           float coverage = smoothstep(-0.055, 0.10, assembly * 1.17 - scanPosition);
           float grain = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
@@ -72,7 +81,13 @@ function applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBle
         float visibleGrain = 1.0 - smoothstep(4.0, 15.0, length(vViewPosition));
         float skinGrain = grainField(bitePosition);
         roughnessFactor = clamp(roughnessFactor + skinGrain * .13, .23, .62);
-        diffuseColor.rgb *= 1.0 + (skinGrain * .082) * visibleGrain;
+        diffuseColor.rgb *= 1.0 + (skinGrain * .14) * visibleGrain;
+        float eyeArea = (1.0 - smoothstep(.06, .12, abs(bitePosition.z - 1.92)))
+                      * smoothstep(.10, .13, bitePosition.y)
+                      * (1.0 - smoothstep(.23, .30, bitePosition.y))
+                      * smoothstep(.42, .47, abs(bitePosition.x));
+        float darkEye = 1.0 - smoothstep(.032, .067, max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b));
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.29, .36, .40), eyeRoll * eyeArea * darkEye * .68);
       `).replace('#include <normal_fragment_maps>', `
         #include <normal_fragment_maps>
         vec3 dx = dFdx(-vViewPosition);
@@ -264,14 +279,22 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const bite = { value: 0 };
   const submerge = { value: 0 };
   const rigBlend = { value: 0 };
+  const eyeRoll = { value: 0 };
   const waterline = new three.Plane(new three.Vector3(0, 1, 0), .12);
-  const setJawMorph = applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBlend, waterline);
+  const setJawMorph = applySharkSkin(three, shark, swimTime, assembly, bite, submerge, rigBlend, eyeRoll, waterline);
   const surfaceLight = makeSurfaceLight(three, shark, MeshSurfaceSampler, swimTime, assembly);
   const setMouth = createSharkJaw(three, shark, waterline);
   const spine = ['SwimBody', 'SwimBack', 'SwimPeduncle', 'SwimTail']
     .map(name => shark.getObjectByName(name)).filter(Boolean);
   const bend = [.105, .17, .235, .255];
   const phase = [0, .65, 1.29, 1.95];
+  function flexSpine(time, amplitude, bendBias) {
+    spine.forEach((bone, index) => {
+      bone.rotation.y = (Math.sin(time - phase[index]) * bend[index] * amplitude
+        + bendBias * (index + 1) / spine.length) * rigBlend.value;
+      bone.rotation.z = Math.sin(time * .55 - phase[index]) * .026 * amplitude * rigBlend.value;
+    });
+  }
   function setOpening(open) {
     setJawMorph(open);
     setMouth(open);
@@ -298,10 +321,12 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const splash = new three.Points(splashGeometry, splashMaterial);
   splash.frustumCulled = false;
   scene.add(splash);
-  const points = [[3.1,-1.25,-15],[2.65,-.91,-10],[1.95,1.06,-3.3],[.61,1.06,2.15],[.16,.98,4.86],[.31,1.04,7.7]];
+  // The nose stops short of the near plane; the last part of the lunge exits sideways.
+  const points = [[3.1,-1.25,-15],[2.65,-.91,-10],[1.95,1.06,-3.3],
+    [.61,1.06,2.15],[.30,.98,4.48],[6.25,1.12,4.42]];
   const path = new three.CatmullRomCurve3(points.map(point => new three.Vector3(...point)));
   const returnPath = new three.CatmullRomCurve3([
-    [5.7,2.65,4.8], [4.3,1.92,1.7], [3.05,.86,-3.6],
+    [6.25,1.4,4.42], [4.3,1.73,1.7], [3.05,.86,-3.6],
     [2.10,-.63,-8.5], [1.05,-1.55,-12.0],
   ].map(point => new three.Vector3(...point)));
   const direction = new three.Vector3(0, 0, 1);
@@ -309,6 +334,8 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
   const returnStart = 3.18;
   const returnDuration = 1.64;
   const patrolStart = returnStart + returnDuration;
+  const returnPhase = returnStart * 6.6 + Math.pow(returnStart / 3.3, 1.52) * 4.1;
+  const patrolPhase = returnPhase + returnDuration * 7.4;
   const patrolOrigin = returnPath.getPoint(1);
   const returnHeading = new three.Quaternion().setFromUnitVectors(direction, returnPath.getTangent(1));
   const swimTarget = new three.Vector3();
@@ -386,6 +413,8 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
     );
   }
 
+  const previousTangent = new three.Vector3();
+  const nextTangent = new three.Vector3();
   function animate(now) {
     const time = Math.max(0, now - start) / 1000;
     if (time >= patrolStart) {
@@ -395,7 +424,7 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
         const depth = Number(hero.style.getPropertyValue('--ocean-depth'));
         camera.lookAt(0, .5 - depth * (camera.aspect < .8 ? 5.1 : 3.1), 0);
         const entry = three.MathUtils.smoothstep(age, 0, 2.1);
-        rigBlend.value = spine.length === 4 ? three.MathUtils.smoothstep(age, 0, .85) : 0;
+        rigBlend.value = spine.length === 4 ? 1 : 0;
         patrolPosition(age, swimTarget);
         patrolPosition(age + .065, swimDirection).sub(swimTarget);
         swimDirection.y *= .48;
@@ -403,18 +432,19 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
         swimHeading.setFromUnitVectors(direction, swimDirection);
         shark.position.copy(patrolOrigin).lerp(swimTarget, entry);
         shark.quaternion.copy(returnHeading).slerp(swimHeading, entry);
-        shark.rotateZ((Math.sin(age * .85) * .13 + swimDirection.x * .12) * entry);
-        spine.forEach((bone, index) => {
-          bone.rotation.y = (Math.sin(age * 6.8 - phase[index]) * bend[index]
-            + swimDirection.x * .052) * rigBlend.value;
-          bone.rotation.z = Math.sin(age * 4.1 - phase[index]) * .035 * rigBlend.value;
-        });
+        patrolPosition(age + .13, nextTangent).sub(swimTarget).normalize();
+        previousTangent.copy(swimDirection);
+        const turn = nextTangent.cross(previousTangent).y;
+        const bank = three.MathUtils.clamp(turn * 4.4, -.23, .23);
+        shark.rotateZ((bank + Math.sin(age * .85) * .045) * entry);
+        flexSpine(patrolPhase + age * 6.8 + .42 * Math.sin(age * .92), .85 + .13 * Math.sin(age * .92), bank * .66 * entry);
         shark.visible = true;
         waterline.constant = 12;
         submerge.value = 1;
         assembly.value = 1.2;
         bite.value = 0;
-        setOpening(0);
+        eyeRoll.value = 0;
+        setOpening(.009 + .008 * Math.sin(age * 2.4));
         if (surfaceLight) surfaceLight.visible = false;
         canvas.dataset.playing = 'true';
         swimTime.value = patrolStart + age * .66;
@@ -434,7 +464,8 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
     }
     shark.position.copy(path.getPoint(progress));
     const tangent = path.getTangent(progress);
-    const faceCamera = three.MathUtils.smoothstep(progress, .47, .72);
+    const faceCamera = three.MathUtils.smoothstep(progress, .47, .72)
+      * (1 - three.MathUtils.smoothstep(progress, .81, .96));
     tangent.y *= .69;
     tangent.x *= 1 - faceCamera;
     tangent.y *= 1 - faceCamera;
@@ -443,6 +474,10 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
     shark.rotateZ((-0.27 + Math.sin(time * 2.8) * .12) * (1 - faceCamera));
     bite.value = three.MathUtils.smoothstep(progress, .49, .73)
       * (1 - three.MathUtils.smoothstep(progress, .88, .96));
+    rigBlend.value = spine.length === 4 ? three.MathUtils.smoothstep(time, .95, 1.65) : 0;
+    flexSpine(time * 6.6 + progress * 4.1, 1.10 + progress * .52, 0);
+    eyeRoll.value = three.MathUtils.smoothstep(progress, .73, .84)
+      * (1 - three.MathUtils.smoothstep(progress, .88, .97));
     setOpening(bite.value);
     shark.visible = progress < .95;
     const returning = time >= returnStart;
@@ -450,7 +485,8 @@ function playIntro(three, shark, MeshSurfaceSampler, canvas, onPass) {
       const fraction = Math.min(1, (time - returnStart) / returnDuration);
       shark.position.copy(returnPath.getPoint(fraction));
       shark.quaternion.setFromUnitVectors(direction, returnPath.getTangent(fraction));
-      shark.rotateZ(.44 * Math.sin(Math.PI * fraction));
+      shark.rotateZ(.39 * Math.sin(Math.PI * fraction));
+      flexSpine(returnPhase + (time - returnStart) * 7.4, 1.60 - fraction * .75, .14 * Math.sin(Math.PI * fraction));
       shark.visible = true;
       submerge.value = three.MathUtils.smoothstep(fraction, .53, .9);
       if (fraction >= .53) {

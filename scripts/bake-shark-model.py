@@ -14,8 +14,8 @@ def opened_vertex(x, y, z):
     # The nose stays fixed; only the lower cheek and mandible follow the hinge.
     lower_cheek = 1 - smooth(-.23, .11, y)
     weight = lower_cheek * smooth(1.03, 1.76, z) * (1 - smooth(2.18, 2.53, z))
-    angle = .77 * weight
-    hinge_y, hinge_z = -.025, 1.22
+    angle = .88 * weight
+    hinge_y, hinge_z = -.045, 1.28
     arm_y, arm_z = y - hinge_y, z - hinge_z
     return (x, math.cos(angle) * arm_y - math.sin(angle) * arm_z + hinge_y,
             math.sin(angle) * arm_y + math.cos(angle) * arm_z + hinge_z)
@@ -31,6 +31,16 @@ def vertex_normals(points, triangles):
             for axis in range(3):
                 sums[index][axis] += cross[axis]
     return [tuple(axis / (math.hypot(*entry) or 1) for axis in entry) for entry in sums]
+
+
+def smooth_seam(normals, points, pairs):
+    for left, right in pairs:
+        if math.dist(points[left], points[right]) > 1e-5:
+            continue
+        average = tuple(a + b for a, b in zip(normals[left], normals[right]))
+        length = math.hypot(*average) or 1.0
+        normals[left] = normals[right] = tuple(axis / length for axis in average)
+    return normals
 
 
 def add_swim_rig(model, mesh_node, primitive, points, append_view):
@@ -75,7 +85,7 @@ def add_swim_rig(model, mesh_node, primitive, points, append_view):
                        'inverseBindMatrices': inverse_bind}]
 
 
-def bake(path):
+def bake(path, opened_points=None, seam=()):
     data = path.read_bytes()
     magic, version, _ = struct.unpack_from('<4sII', data)
     assert magic == b'glTF' and version == 2
@@ -98,12 +108,12 @@ def bake(path):
         return list(struct.iter_unpack(layout, payload[offset:offset + length]))
 
     points = read_accessor(primitive['attributes']['POSITION'], '<fff')
-    opened = [opened_vertex(*point) for point in points]
+    opened = opened_points if opened_points is not None else [opened_vertex(*point) for point in points]
     index_type = model['accessors'][primitive['indices']]['componentType']
     indices = [index for (index,) in read_accessor(primitive['indices'], {5123: '<H', 5125: '<I'}[index_type])]
     triangles = list(zip(indices[::3], indices[1::3], indices[2::3]))
-    original_normals = vertex_normals(points, triangles)
-    opened_normals = vertex_normals(opened, triangles)
+    original_normals = read_accessor(primitive['attributes']['NORMAL'], '<fff')
+    opened_normals = smooth_seam(vertex_normals(opened, triangles), opened, seam)
 
     def append_view(data):
         payload.extend(b'\0' * (-len(payload) % 4))

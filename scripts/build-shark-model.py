@@ -14,9 +14,9 @@ SECTIONS = [
     (-1.88, .20, .23, .00), (-1.40, .335, .38, .025),
     (-.78, .49, .54, .04), (-.10, .59, .65, .06),
     (.62, .64, .65, .035), (1.15, .63, .56, .015),
-    (1.54, .59, .46, .02), (1.85, .49, .35, .08),
-    (2.12, .34, .24, .14), (2.37, .18, .115, .16),
-    (2.51, .01, .012, .15),
+    (1.54, .61, .49, .015), (1.85, .53, .39, .065),
+    (2.12, .425, .28, .115), (2.37, .265, .15, .145),
+    (2.49, .115, .073, .145), (2.53, .006, .006, .138),
 ]
 
 
@@ -73,10 +73,26 @@ class Surface:
                 self.triangles.extend(((a, b, a + columns), (b, b + columns, a + columns)))
 
 
-def body_point(t, angle):
-    z = mix(SECTIONS[0][0], SECTIONS[-1][0], t)
-    point = surface(z, angle)
-    return point, skin_color(*point, math.sin(angle))
+def body_point(z, angle):
+    x, y, _ = surface(z, angle)
+    belly = math.sin(angle)
+    side = abs(math.cos(angle))
+    theta = math.asin(belly)
+    opening = 0
+    ridge = 0
+    if .58 < z < 1.47 and -.72 < theta < .62:
+        for index in range(5):
+            length = rig.smooth(-.70 + .018 * index, -.56 + .018 * index, theta) * (
+                1 - rig.smooth(.30 - .027 * index, .58 - .027 * index, theta))
+            center = 1.30 - .136 * index + .11 * (theta + .08) ** 2
+            offset = z - center
+            opening += length * math.exp(-(offset / .015) ** 2)
+            ridge += length * math.exp(-((offset + .025) / .023) ** 2)
+    x *= 1 + .036 * ridge - .052 * opening
+    tint = skin_color(x, y, z, belly)
+    tint = tuple(round(channel * (1 - .76 * min(1, opening) * side)) for channel in tint)
+
+    return (x, y, z), tint
 
 
 def fin(mesh, curve, span, side=1, pale=False):
@@ -110,41 +126,71 @@ def fin(mesh, curve, span, side=1, pale=False):
 def facial_detail(mesh):
     for side in (-1, 1):
         # A convex, nearly black eye with a subtle blue-grey limbus.
-        z0, theta0 = 1.86, .29
+        z0, theta0 = 1.92, .265
         def eye(t, angle):
             r = max(.001, t)
-            z = z0 + .104 * r * math.cos(angle)
-            theta = theta0 + .235 * r * math.sin(angle)
+            z = z0 + .096 * r * math.cos(angle)
+            theta = theta0 + .213 * r * math.sin(angle)
             x, y, _ = surface(z, theta)
             edge = rig.smooth(.72, 1, r)
             hue = tuple(round(mix(a, b, edge)) for a, b in zip((4, 8, 10), (37, 51, 55)))
-            return (side * (x + .006 + .030 * (1 - r * r)), y, z), hue
+            return (side * (x + .003 + .021 * (1 - r * r)), y, z), hue
         start = len(mesh.triangles)
         mesh.loft(11, 28, eye)
         if side < 0:
             mesh.triangles[start:] = [(a, c, b) for a, b, c in mesh.triangles[start:]]
 
-        # Five tapered branchial openings follow the actual body contour.
-        for index in range(5):
-            for row in range(26):
-                t = row / 25
-                theta = mix(-.47 + index * .013, .40 - index * .03, t)
-                z = 1.19 - index * .115 + .115 * (t - .46) ** 2
-                width = .011 * math.sin(math.pi * t) ** .65 + .0004
-                offset = len(mesh.points)
-                for edge in (-1, 0, 1):
-                    x, y, pos = surface(z + edge * width, theta)
-                    mesh.points.append((side * (x + .0025), y, pos))
-                    mesh.colors.append((15, 26, 31) if edge == 0 else skin_color(x, y, pos, math.sin(theta)))
-                if row:
-                    faces = [(offset - 3, offset, offset - 2), (offset, offset + 1, offset - 2),
-                             (offset - 2, offset + 1, offset - 1), (offset + 1, offset + 2, offset - 1)]
-                    mesh.triangles.extend(faces if side > 0 else [(a, c, b) for a, b, c in faces])
+        # Small nostril groove on the underside of each side of the rostrum.
+        def nostril(t, angle):
+            r = max(.001, t)
+            z = 2.31 + .057 * r * math.cos(angle)
+            theta = -.33 + .11 * r * math.sin(angle)
+            x, y, _ = surface(z, theta)
+            edge = rig.smooth(.42, 1, r)
+            skin = skin_color(x, y, z, math.sin(theta))
+            color = tuple(round(mix(dark, light, edge)) for dark, light in zip((21, 31, 34), skin))
+            return (side * (x + .004), y, z), color
+        start = len(mesh.triangles)
+        mesh.loft(7, 22, nostril)
+        if side < 0:
+            mesh.triangles[start:] = [(a, c, b) for a, b, c in mesh.triangles[start:]]
+
+
+def mouth_z(angle):
+    belly = max(0, -math.sin(angle))
+    return 1.29 + 1.04 * belly ** .86
+
+
+def articulate(point, amount):
+    x, y, z = point
+    hinge_y, hinge_z = -.045, 1.28
+    arm_y, arm_z = y - hinge_y, z - hinge_z
+    angle = .91 * amount
+    return (x, hinge_y + math.cos(angle) * arm_y - math.sin(angle) * arm_z,
+            hinge_z + math.sin(angle) * arm_y + math.cos(angle) * arm_z)
+
+
+def add_body(mesh):
+    # Duplicate the lip ring so its upper and lower edges can separate without overlap.
+    back_rows, columns = 194, 104
+    mesh.loft(back_rows, columns, lambda t, angle: body_point(mix(SECTIONS[0][0], mouth_z(angle), t), angle))
+    mesh.opened = []
+    for index, point in enumerate(mesh.points):
+        z = point[2]
+        angle = math.tau * (index % columns) / columns
+        underside = rig.smooth(.0, .42, -math.sin(angle))
+        amount = underside * rig.smooth(1.01, 1.36, z)
+        mesh.opened.append(articulate(point, amount))
+    mesh.loft(56, columns, lambda t, angle: body_point(mix(mouth_z(angle), SECTIONS[-1][0], t), angle))
+    mesh.seam = [((back_rows - 1) * columns + col, back_rows * columns + col)
+                 for col in range(columns)]
+    mesh.mouth_seam = [body_point(mouth_z(angle), angle)[0]
+                       for angle in (math.pi + math.pi * i / 32 for i in range(33))]
 
 
 def build_mesh():
     mesh = Surface()
-    mesh.loft(146, 96, body_point)
+    add_body(mesh)
     fin(mesh, [(0, 0, .42, .10, .66, .17), (.32, 0, .84, .00, .52, .12),
                (.67, 0, 1.27, -.19, .30, .063), (1, 0, 1.61, -.39, .004, .002)], (1, 0))
     fin(mesh, [(0, 0, .20, -1.63, .26, .069), (.52, 0, .38, -1.75, .19, .038),
@@ -168,7 +214,7 @@ def build_mesh():
 def serialize(mesh, path):
     payload = bytearray()
     model = {"asset": {"version": "2.0", "generator": "Jingxu Shark Builder"},
-             "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"name": "GreatWhite", "mesh": 0}],
+             "scene": 0, "scenes": [{"nodes": [0], "extras": {"mouthSeam": mesh.mouth_seam}}], "nodes": [{"name": "GreatWhite", "mesh": 0}],
              "meshes": [{"primitives": []}], "buffers": [{}], "bufferViews": [], "accessors": [],
              "materials": [{"name": "Great white skin", "doubleSided": True,
                             "pbrMetallicRoughness": {"metallicFactor": 0, "roughnessFactor": .46}}]}
@@ -190,7 +236,8 @@ def serialize(mesh, path):
 
     attrs = {
         "POSITION": add(mesh.points, "<fff", 5126, "VEC3", bounds=True),
-        "NORMAL": add(rig.vertex_normals(mesh.points, mesh.triangles), "<fff", 5126, "VEC3"),
+        "NORMAL": add(rig.smooth_seam(rig.vertex_normals(mesh.points, mesh.triangles), mesh.points, mesh.seam),
+                      "<fff", 5126, "VEC3"),
         "COLOR_0": add(mesh.colors, "<BBB", 5121, "VEC3", normalized=True),
     }
     indices = [(index,) for tri in mesh.triangles for index in tri]
@@ -203,7 +250,7 @@ def serialize(mesh, path):
     path.write_bytes(struct.pack("<4sII", b"glTF", 2, 28 + len(meta) + len(payload))
                      + struct.pack("<I4s", len(meta), b"JSON") + meta
                      + struct.pack("<I4s", len(payload), b"BIN\0") + payload)
-    rig.bake(path)
+    rig.bake(path, mesh.opened + mesh.points[len(mesh.opened):], mesh.seam)
 
 
 if __name__ == "__main__":
